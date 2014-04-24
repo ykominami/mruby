@@ -219,20 +219,17 @@ assert("Array#insert") do
   assert_equal ["a", "b", "c", "d", nil, nil, 99], b.insert(6, 99)
 end
 
-assert("Array#bsearch") do
-  # Find minimum mode
-  a = [0, 4, 7, 10, 12]
-  assert_include [4, 7], a.bsearch {|x| x >= 4 }
-  assert_equal 7, a.bsearch {|x| x >= 6 }
-  assert_equal 0, a.bsearch {|x| x >= -1 }
-  assert_nil a.bsearch {|x| x >= 100 }
+assert("Array#delete_if") do
+  a = [1, 2, 3, 4, 5]
+  assert_equal [1, 2, 3, 4, 5], a.delete_if { false }
+  assert_equal [1, 2, 3, 4, 5], a
 
-  # Find any mode
-  a = [0, 4, 7, 10, 12]
-  assert_include [4, 7], a.bsearch {|x| 1 - (x / 4).truncate }
-  assert_nil a.bsearch {|x| 4 - (x / 2).truncate }
-  assert_equal(nil, a.bsearch {|x| 1 })
-  assert_equal(nil, a.bsearch {|x| -1 })
+  a = [1, 2, 3, 4, 5]
+  assert_equal [], a.delete_if { true }
+  assert_equal [], a
+
+  a = [ 1, 2, 3, 4, 5 ]
+  assert_equal [1, 2, 3], a.delete_if { |val| val > 3 }
 end
 
 assert("Array#delete_if") do

@@ -58,7 +58,7 @@ class Array
     ary = self.dup
     if block
       ary.uniq!(&block)
-    else
+    else 
       ary.uniq!
     end
     ary
@@ -217,7 +217,7 @@ class Array
   #    [ "a", "b", "c" ].compact!           #=> nil
   #
   def compact!
-    result = self.select { |e| !e.nil? }
+    result = self.select { |e| e != nil }
     if result.size == self.size
       nil
     else
@@ -262,7 +262,7 @@ class Array
   #
 
   def fetch(n=nil, ifnone=NONE, &block)
-    warn "block supersedes default value argument" if !n.nil? && ifnone != NONE && block
+    warn "block supersedes default value argument" if n != nil && ifnone != NONE && block
 
     idx = n
     if idx < 0
@@ -312,51 +312,51 @@ class Array
   #
 
   def fill(arg0=nil, arg1=nil, arg2=nil, &block)
-    if arg0.nil? && arg1.nil? && arg2.nil? && !block
+    if arg0 == nil && arg1 == nil && arg2 == nil && !block
       raise ArgumentError, "wrong number of arguments (0 for 1..3)"
     end
 
     beg = len = 0
     ary = []
     if block
-      if arg0.nil? && arg1.nil? && arg2.nil?
+      if arg0 == nil && arg1 == nil && arg2 == nil
         # ary.fill { |index| block }                    -> ary
         beg = 0
         len = self.size
-      elsif !arg0.nil? && arg0.kind_of?(Range)
+      elsif arg0 != nil && arg0.kind_of?(Range)
         # ary.fill(range) { |index| block }             -> ary
         beg = arg0.begin
         beg += self.size if beg < 0
         len = arg0.end
         len += self.size if len < 0
         len += 1 unless arg0.exclude_end?
-      elsif !arg0.nil?
+      elsif arg0 != nil
         # ary.fill(start [, length] ) { |index| block } -> ary
         beg = arg0
         beg += self.size if beg < 0
-        if arg1.nil?
+        if arg1 == nil
           len = self.size
         else
           len = arg0 + arg1
         end
       end
     else
-      if !arg0.nil? && arg1.nil? && arg2.nil?
+      if arg0 != nil && arg1 == nil && arg2 == nil
         # ary.fill(obj)                                 -> ary
         beg = 0
         len = self.size
-      elsif !arg0.nil? && !arg1.nil? && arg1.kind_of?(Range)
+      elsif arg0 != nil && arg1 != nil && arg1.kind_of?(Range)
         # ary.fill(obj, range )                         -> ary
         beg = arg1.begin
         beg += self.size if beg < 0
         len = arg1.end
         len += self.size if len < 0
         len += 1 unless arg1.exclude_end?
-      elsif !arg0.nil? && !arg1.nil?
+      elsif arg0 != nil && arg1 != nil
         # ary.fill(obj, start [, length])               -> ary
         beg = arg1
         beg += self.size if beg < 0
-        if arg2.nil?
+        if arg2 == nil
           len = self.size
         else
           len = beg + arg2
@@ -370,7 +370,7 @@ class Array
         self[i] = block.call(i)
         i += 1
       end
-    else
+    else 
       while i < len
         self[i] = arg0
         i += 1
@@ -516,88 +516,6 @@ class Array
 
   ##
   #  call-seq:
-  #     ary.bsearch {|x| block }  -> elem
-  #
-  #  By using binary search, finds a value from this array which meets
-  #  the given condition in O(log n) where n is the size of the array.
-  #
-  #  You can use this method in two use cases: a find-minimum mode and
-  #  a find-any mode.  In either case, the elements of the array must be
-  #  monotone (or sorted) with respect to the block.
-  #
-  #  In find-minimum mode (this is a good choice for typical use case),
-  #  the block must return true or false, and there must be an index i
-  #  (0 <= i <= ary.size) so that:
-  #
-  #  - the block returns false for any element whose index is less than
-  #    i, and
-  #  - the block returns true for any element whose index is greater
-  #    than or equal to i.
-  #
-  #  This method returns the i-th element.  If i is equal to ary.size,
-  #  it returns nil.
-  #
-  #     ary = [0, 4, 7, 10, 12]
-  #     ary.bsearch {|x| x >=   4 } #=> 4
-  #     ary.bsearch {|x| x >=   6 } #=> 7
-  #     ary.bsearch {|x| x >=  -1 } #=> 0
-  #     ary.bsearch {|x| x >= 100 } #=> nil
-  #
-  #  In find-any mode (this behaves like libc's bsearch(3)), the block
-  #  must return a number, and there must be two indices i and j
-  #  (0 <= i <= j <= ary.size) so that:
-  #
-  #  - the block returns a positive number for ary[k] if 0 <= k < i,
-  #  - the block returns zero for ary[k] if i <= k < j, and
-  #  - the block returns a negative number for ary[k] if
-  #    j <= k < ary.size.
-  #
-  #  Under this condition, this method returns any element whose index
-  #  is within i...j.  If i is equal to j (i.e., there is no element
-  #  that satisfies the block), this method returns nil.
-  #
-  #     ary = [0, 4, 7, 10, 12]
-  #     # try to find v such that 4 <= v < 8
-  #     ary.bsearch {|x| 1 - (x / 4).truncate } #=> 4 or 7
-  #     # try to find v such that 8 <= v < 10
-  #     ary.bsearch {|x| 4 - (x / 2).truncate } #=> nil
-  #
-  #  You must not mix the two modes at a time; the block must always
-  #  return either true/false, or always return a number.  It is
-  #  undefined which value is actually picked up at each iteration.
-
-  def bsearch(&block)
-    return to_enum :bsearch unless block_given?
-
-    low = 0
-    high = self.size
-    satisfied = false
-    while low < high
-      mid = low + ((high - low) / 2).truncate
-      val = self[mid]
-      v = block.call(val)
-      if v.is_a?(Integer)
-        return val if v == 0
-        smaller = v < 0
-      elsif v == true
-        satisfied = true
-        smaller = true
-      elsif v == false || v.nil?
-        smaller = false
-      end
-      if smaller
-        high = mid
-      else
-        low = mid + 1
-      end
-    end
-    return nil if low == self.size
-    return nil unless satisfied
-    self[low]
-  end
-
-  ##
-  #  call-seq:
   #     ary.delete_if { |item| block }  -> ary
   #     ary.delete_if                   -> Enumerator
   #
@@ -617,68 +535,14 @@ class Array
     return to_enum :delete_if unless block_given?
 
     idx = 0
-    while idx < self.size do
-      if block.call(self[idx])
-        self.delete_at(idx)
-      else
-        idx += 1
-      end
-    end
-    self
-  end
-
-  ##
-  #  call-seq:
-  #     ary.keep_if { |item| block } -> ary
-  #     ary.keep_if                  -> Enumerator
-  #
-  #  Deletes every element of +self+ for which the given block evaluates to
-  #  +false+.
-  #
-  #  See also Array#select!
-  #
-  #  If no block is given, an Enumerator is returned instead.
-  #
-  #     a = [1, 2, 3, 4, 5]
-  #     a.keep_if { |val| val > 3 } #=> [4, 5]
-
-  def keep_if(&block)
-    return to_enum :keep_if unless block_given?
-
-    idx = 0
     len = self.size
     while idx < self.size do
       if block.call(self[idx])
-        idx += 1
-      else
         self.delete_at(idx)
+      else
+        idx += 1
       end
     end
     self
-  end
-
-  ##
-  #  call-seq:
-  #     ary.select!  {|item| block } -> ary or nil
-  #     ary.select!                  -> Enumerator
-  #
-  #  Invokes the given block passing in successive elements from +self+,
-  #  deleting elements for which the block returns a +false+ value.
-  #
-  #  If changes were made, it will return +self+, otherwise it returns +nil+.
-  #
-  #  See also Array#keep_if
-  #
-  #  If no block is given, an Enumerator is returned instead.
-
-  def select!(&block)
-    return to_enum :select! unless block_given?
-
-    result = []
-    self.each do |x|
-      result << x if block.call(x)
-    end
-    return nil if self.size == result.size
-    self.replace(result)
   end
 end
