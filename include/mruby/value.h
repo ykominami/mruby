@@ -7,19 +7,6 @@
 #ifndef MRUBY_VALUE_H
 #define MRUBY_VALUE_H
 
-#include "mruby/common.h"
-
-/**
- * @file mruby/value.h
- * @defgroup mruby_value Value definitions
- *
- * @ref mrb_value functions and macros.
- *
- * @ingroup mruby
- * @{
- */
-MRB_BEGIN_DECL
-
 typedef uint32_t mrb_sym;
 typedef uint8_t mrb_bool;
 struct mrb_state;
@@ -47,21 +34,25 @@ struct mrb_state;
 
 #ifdef MRB_USE_FLOAT
   typedef float mrb_float;
+# define mrb_float_to_str(buf, i) sprintf(buf, "%.7e", i)
 # define str_to_mrb_float(buf) strtof(buf, NULL)
 #else
   typedef double mrb_float;
+# define mrb_float_to_str(buf, i) sprintf(buf, "%.16e", i)
 # define str_to_mrb_float(buf) strtod(buf, NULL)
 #endif
 
-#if defined _MSC_VER && _MSC_VER < 1900
+#ifdef _MSC_VER
 # ifndef __cplusplus
 #  define inline __inline
 # endif
-# include <stdarg.h>
+# if _MSC_VER < 1900
+#  include <stdarg.h>
 MRB_API int mrb_msvc_vsnprintf(char *s, size_t n, const char *format, va_list arg);
 MRB_API int mrb_msvc_snprintf(char *s, size_t n, const char *format, ...);
-# define vsnprintf(s, n, format, arg) mrb_msvc_vsnprintf(s, n, format, arg)
-# define snprintf(s, n, format, ...) mrb_msvc_snprintf(s, n, format, __VA_ARGS__)
+#  define vsnprintf(s, n, format, arg) mrb_msvc_vsnprintf(s, n, format, arg)
+#  define snprintf(s, n, format, ...) mrb_msvc_snprintf(s, n, format, __VA_ARGS__)
+# endif
 # if _MSC_VER < 1800
 #  include <float.h>
 #  define isfinite(n) _finite(n)
@@ -72,7 +63,11 @@ MRB_API int mrb_msvc_snprintf(char *s, size_t n, const char *format, ...);
 static const unsigned int IEEE754_INFINITY_BITS_SINGLE = 0x7F800000;
 #  define INFINITY (*(float *)&IEEE754_INFINITY_BITS_SINGLE)
 #  define NAN ((float)(INFINITY - INFINITY))
+# else
+#  include <inttypes.h>
 # endif
+#else
+# include <inttypes.h>
 #endif
 
 enum mrb_vtype {
@@ -176,14 +171,8 @@ mrb_obj_value(void *p)
   return v;
 }
 
-
-/**
- * Get a nil mrb_value object.
- *
- * @return
- *      nil mrb_value object reference.
- */
-MRB_INLINE mrb_value mrb_nil_value(void)
+static inline mrb_value
+mrb_nil_value(void)
 {
   mrb_value v;
   SET_NIL_VALUE(v);
@@ -221,31 +210,5 @@ mrb_undef_value(void)
   SET_UNDEF_VALUE(v);
   return v;
 }
-
-#ifdef MRB_USE_ETEXT_EDATA
-extern char _etext[];
-#ifdef MRB_NO_INIT_ARRAY_START
-extern char _edata[];
-
-static inline mrb_bool
-mrb_ro_data_p(const char *p)
-{
-  return _etext < p && p < _edata;
-}
-#else
-extern char __init_array_start[];
-
-static inline mrb_bool
-mrb_ro_data_p(const char *p)
-{
-  return _etext < p && p < (char*)&__init_array_start;
-}
-#endif
-#else
-# define mrb_ro_data_p(p) FALSE
-#endif
-
-/** @} */
-MRB_END_DECL
 
 #endif  /* MRUBY_VALUE_H */
