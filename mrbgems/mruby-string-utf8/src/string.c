@@ -4,7 +4,6 @@
 #include "mruby/string.h"
 #include "mruby/range.h"
 #include "mruby/re.h"
-#include <ctype.h>
 #include <string.h>
 
 #define STR_EMBED_P(s) ((s)->flags & MRB_STR_EMBED)
