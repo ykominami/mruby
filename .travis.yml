@@ -1,22 +1,20 @@
 language: c
 
+sudo: false
+
 matrix:
   include:
     - os: linux
-      sudo: 9000
+      sudo: false
     - os: osx
-      osx_image: xcod6.4
+      osx_image: xcode7.1
 
-install:
-  - if [ $TRAVIS_OS_NAME = 'linux' ]; then sudo apt-get update -qq; sudo apt-get -q install gperf; fi
+addons:
+  apt:
+    packages:
+      - gperf
 
+env:
+    MRUBY_CONFIG=travis_config.rb
 env: MRUBY_CONFIG=travis_config.rb
-script: "./minirake all test"
-
-notifications:
-  # Update mruby-head installed on Travis CI so other projects can test against it.
-  webhooks:
-    urls:
-      - "https://rubies.travis-ci.org/rebuild/mruby-head"
-    on_success: always
-    on_failure: never
+script: "./minirake -j4 all test"

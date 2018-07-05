@@ -6,9 +6,11 @@
 
 #include <limits.h>
 #include <string.h>
-#include "mruby.h"
-#include "mruby/khash.h"
-#include "mruby/string.h"
+#include <mruby.h>
+#include <mruby/khash.h>
+#include <mruby/string.h>
+#include <mruby/dump.h>
+#include <mruby/class.h>
 
 /* ------------------------------------------------------ */
 typedef struct symbol_name {
@@ -61,8 +63,16 @@ sym_intern(mrb_state *mrb, const char *name, size_t len, mrb_bool lit)
     return kh_value(h, k);
 
   sym = ++mrb->symidx;
-  if (lit) {
-    sname.name = name;
+  if (mrb->symcapa < sym) {
+    if (mrb->symcapa == 0) mrb->symcapa = 100;
+    else mrb->symcapa = (size_t)(mrb->symcapa * 6 / 5);
+    mrb->symtbl = (symbol_name*)mrb_realloc(mrb, mrb->symtbl, sizeof(symbol_name)*(mrb->symcapa+1));
+  }
+  sname = &mrb->symtbl[sym];
+  sname->len = (uint16_t)len;
+  if (lit || mrb_ro_data_p(name)) {
+    sname->name = name;
+    sname->lit = TRUE;
   }
   else {
     p = (char *)mrb_malloc(mrb, len+1);
@@ -353,7 +363,9 @@ symname_p(const char *name)
       if (*++m == '*') ++m;
       break;
     case '!':
-      if (*++m == '=') ++m;
+      switch (*++m) {
+        case '=': case '~': ++m;
+      }
       break;
     case '+': case '-':
       if (*++m == '@') ++m;
@@ -477,7 +489,9 @@ mrb_init_symbol(mrb_state *mrb)
 {
   struct RClass *sym;
 
-  sym = mrb->symbol_class = mrb_define_class(mrb, "Symbol", mrb->object_class);                 /* 15.2.11 */
+  mrb->symbol_class = sym = mrb_define_class(mrb, "Symbol", mrb->object_class);                 /* 15.2.11 */
+  MRB_SET_INSTANCE_TT(sym, MRB_TT_SYMBOL);
+  mrb_undef_class_method(mrb,  sym, "new");
 
   mrb_define_method(mrb, sym, "===",             sym_equal,      MRB_ARGS_REQ(1));              /* 15.2.11.3.1  */
   mrb_define_method(mrb, sym, "id2name",         mrb_sym_to_s,   MRB_ARGS_NONE());              /* 15.2.11.3.2  */

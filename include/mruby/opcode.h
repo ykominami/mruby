@@ -82,7 +82,8 @@ enum {
   OP_JMPIF,/*     A sBx   if R(A) pc+=sBx                                 */
   OP_JMPNOT,/*    A sBx   if !R(A) pc+=sBx                                */
   OP_ONERR,/*     sBx     rescue_push(pc+sBx)                             */
-  OP_RESCUE,/*    A       clear(exc); R(A) := exception (ignore when A=0) */
+  OP_RESCUE,/*    A B C   if A (if C exc=R(A) else R(A) := exc);
+                          if B R(B) := exc.isa?(R(B)); clear(exc)         */
   OP_POPERR,/*    A       A.times{rescue_pop()}                           */
   OP_RAISE,/*     A       raise(R(A))                                     */
   OP_EPUSH,/*     Bx      ensure_push(SEQ[Bx])                            */
@@ -119,7 +120,7 @@ enum {
   OP_ARYPUSH,/*   A B     ary_push(R(A),R(B))                             */
   OP_AREF,/*      A B C   R(A) := R(B)[C]                                 */
   OP_ASET,/*      A B C   R(B)[C] := R(A)                                 */
-  OP_APOST,/*     A B C   *R(A),R(A+1)..R(A+C) := R(A)                    */
+  OP_APOST,/*     A B C   *R(A),R(A+1)..R(A+C) := R(A)[B..]               */
 
   OP_STRING,/*    A Bx    R(A) := str_dup(Lit(Bx))                        */
   OP_STRCAT,/*    A B     str_cat(R(A),R(B))                              */

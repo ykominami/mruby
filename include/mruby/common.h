@@ -1,5 +1,5 @@
 /*
-** mruby/common.h - mruby common platform definitions
+**"common.h - mruby common platform definition"
 **
 ** See Copyright Notice in mruby.h
 */
@@ -7,22 +7,26 @@
 #ifndef MRUBY_COMMON_H
 #define MRUBY_COMMON_H
 
-/**
- * @file mruby/common.h
- * @defgroup mruby_common Shared compiler macros
- * @ingroup mruby
- * @{
- */
 
 #ifdef __cplusplus
+#ifdef MRB_ENABLE_CXX_ABI
+#define MRB_BEGIN_DECL
+#define MRB_END_DECL
+#else
 # define MRB_BEGIN_DECL extern "C" {
-# define MRB_END_DECL	}
+# define MRB_END_DECL }
+#endif
 #else
 /** Start declarations in C mode */
 # define MRB_BEGIN_DECL
 /** End declarations in C mode */
 # define MRB_END_DECL
 #endif
+
+/**
+ * Shared compiler macros
+ */
+MRB_BEGIN_DECL
 
 /** Declare a function that never returns. */
 #if __STDC_VERSION__ >= 201112L
@@ -63,6 +67,6 @@
 # define MRB_API extern
 #endif
 
-/** @} */
+MRB_END_DECL
 
 #endif  /* MRUBY_COMMON_H */

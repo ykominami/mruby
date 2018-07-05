@@ -7,12 +7,12 @@
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
-#include "mruby/dump.h"
-#include "mruby/irep.h"
-#include "mruby/proc.h"
-#include "mruby/string.h"
-#include "mruby/debug.h"
-#include "mruby/error.h"
+#include <mruby/dump.h>
+#include <mruby/irep.h>
+#include <mruby/proc.h>
+#include <mruby/string.h>
+#include <mruby/debug.h>
+#include <mruby/error.h>
 
 #if SIZE_MAX < UINT32_MAX
 # error size_t must be at least 32 bits wide
@@ -24,11 +24,7 @@
 #define FLAG_SRC_MALLOC 1
 #define FLAG_SRC_STATIC 0
 
-#if SIZE_MAX < UINT32_MAX
-# define SIZE_ERROR_MUL(x, y) ((x) > SIZE_MAX / (y))
-#else
-# define SIZE_ERROR_MUL(x, y) (0)
-#endif
+#define SIZE_ERROR_MUL(nmemb, size) ((size_t)(nmemb) > SIZE_MAX / (size))
 
 static size_t
 skip_padding(const uint8_t *buf)
@@ -47,11 +43,11 @@ offset_crc_body(void)
 static mrb_irep*
 read_irep_record_1(mrb_state *mrb, const uint8_t *bin, size_t *len, uint8_t flags)
 {
-  size_t i;
+  int i;
   const uint8_t *src = bin;
   ptrdiff_t diff;
   uint16_t tt, pool_data_len, snl;
-  size_t plen;
+  int plen;
   int ai = mrb_gc_arena_save(mrb);
   mrb_irep *irep = mrb_add_irep(mrb);
 
@@ -108,7 +104,7 @@ read_irep_record_1(mrb_state *mrb, const uint8_t *bin, size_t *len, uint8_t flag
   }
 
   /* POOL BLOCK */
-  plen = (size_t)bin_to_uint32(src); /* number of pool */
+  plen = bin_to_uint32(src); /* number of pool */
   src += sizeof(uint32_t);
   if (plen > 0) {
     if (SIZE_ERROR_MUL(sizeof(mrb_value), plen)) {
@@ -130,13 +126,21 @@ read_irep_record_1(mrb_state *mrb, const uint8_t *bin, size_t *len, uint8_t flag
       }
       src += pool_data_len;
       switch (tt) { /* pool data */
-      case IREP_TT_FIXNUM:
-        irep->pool[i] = mrb_str_to_inum(mrb, s, 10, FALSE);
+      case IREP_TT_FIXNUM: {
+        mrb_value num = mrb_str_to_inum(mrb, s, 10, FALSE);
+#ifdef MRB_WITHOUT_FLOAT
+        irep->pool[i] = num;
+#else
+        irep->pool[i] = mrb_float_p(num)? mrb_float_pool(mrb, mrb_float(num)) : num;
+#endif
+        }
         break;
 
+#ifndef MRB_WITHOUT_FLOAT
       case IREP_TT_FLOAT:
         irep->pool[i] = mrb_float_pool(mrb, mrb_str_to_dbl(mrb, s, FALSE));
         break;
+#endif
 
       case IREP_TT_STRING:
         irep->pool[i] = mrb_str_pool(mrb, s);
@@ -195,7 +199,7 @@ static mrb_irep*
 read_irep_record(mrb_state *mrb, const uint8_t *bin, size_t *len, uint8_t flags)
 {
   mrb_irep *irep = read_irep_record_1(mrb, bin, len, flags);
-  size_t i;
+  int i;
 
   if (irep == NULL) {
     return NULL;
@@ -266,7 +270,7 @@ static int
 read_lineno_record(mrb_state *mrb, const uint8_t *bin, mrb_irep *irep, size_t *lenp)
 {
   int result = read_lineno_record_1(mrb, bin, irep, lenp);
-  size_t i;
+  int i;
 
   if (result != MRB_DUMP_OK) return result;
   for (i = 0; i < irep->rlen; i++) {
@@ -297,13 +301,14 @@ read_debug_record(mrb_state *mrb, const uint8_t *start, mrb_irep* irep, size_t *
 {
   const uint8_t *bin = start;
   ptrdiff_t diff;
-  size_t record_size, i;
+  size_t record_size;
   uint16_t f_idx;
+  int i;
 
   if (irep->debug_info) { return MRB_DUMP_INVALID_IREP; }
 
   irep->debug_info = (mrb_irep_debug_info*)mrb_malloc(mrb, sizeof(mrb_irep_debug_info));
-  irep->debug_info->pc_count = irep->ilen;
+  irep->debug_info->pc_count = (uint32_t)irep->ilen;
 
   record_size = (size_t)bin_to_uint32(bin);
   bin += sizeof(uint32_t);
@@ -436,8 +441,8 @@ static int
 read_lv_record(mrb_state *mrb, const uint8_t *start, mrb_irep *irep, size_t *record_len, mrb_sym const *syms, uint32_t syms_len)
 {
   const uint8_t *bin = start;
-  size_t i;
   ptrdiff_t diff;
+  int i;
 
   irep->lv = (struct mrb_locals*)mrb_malloc(mrb, sizeof(struct mrb_locals) * (irep->nlocals - 1));
 
@@ -527,7 +532,7 @@ read_binary_header(const uint8_t *bin, size_t *bin_size, uint16_t *crc, uint8_t 
   if (memcmp(header->binary_ident, RITE_BINARY_IDENT, sizeof(header->binary_ident)) == 0) {
     if (bigendian_p())
       *flags |= FLAG_BYTEORDER_NATIVE;
-    else 
+    else
       *flags |= FLAG_BYTEORDER_BIG;
   }
   else if (memcmp(header->binary_ident, RITE_BINARY_IDENT_LIL, sizeof(header->binary_ident)) == 0) {
@@ -548,7 +553,7 @@ read_binary_header(const uint8_t *bin, size_t *bin_size, uint16_t *crc, uint8_t 
   return MRB_DUMP_OK;
 }
 
-MRB_API mrb_irep*
+static mrb_irep*
 read_irep(mrb_state *mrb, const uint8_t *bin, uint8_t flags)
 {
   int result;
@@ -606,7 +611,7 @@ read_irep(mrb_state *mrb, const uint8_t *bin, uint8_t flags)
   return irep;
 }
 
-MRB_API mrb_irep*
+mrb_irep*
 mrb_read_irep(mrb_state *mrb, const uint8_t *bin)
 {
 #ifdef MRB_USE_ETEXT_EDATA
@@ -618,16 +623,19 @@ mrb_read_irep(mrb_state *mrb, const uint8_t *bin)
   return read_irep(mrb, bin, flags);
 }
 
+void mrb_exc_set(mrb_state *mrb, mrb_value exc);
+
 static void
 irep_error(mrb_state *mrb)
 {
-  mrb->exc = mrb_obj_ptr(mrb_exc_new_str_lit(mrb, E_SCRIPT_ERROR, "irep load error"));
+  mrb_exc_set(mrb, mrb_exc_new_str_lit(mrb, E_SCRIPT_ERROR, "irep load error"));
 }
 
-MRB_API mrb_value
-mrb_load_irep_cxt(mrb_state *mrb, const uint8_t *bin, mrbc_context *c)
+void mrb_codedump_all(mrb_state*, struct RProc*);
+
+static mrb_value
+load_irep(mrb_state *mrb, mrb_irep *irep, mrbc_context *c)
 {
-  mrb_irep *irep = mrb_read_irep(mrb, bin);
   struct RProc *proc;
 
   if (!irep) {
@@ -635,9 +643,17 @@ mrb_load_irep_cxt(mrb_state *mrb, const uint8_t *bin, mrbc_context *c)
     return mrb_nil_value();
   }
   proc = mrb_proc_new(mrb, irep);
+  proc->c = NULL;
   mrb_irep_decref(mrb, irep);
+  if (c && c->dump_result) mrb_codedump_all(mrb, proc);
   if (c && c->no_exec) return mrb_obj_value(proc);
-  return mrb_toplevel_run(mrb, proc);
+  return mrb_top_run(mrb, proc, mrb_top_self(mrb), 0);
+}
+
+MRB_API mrb_value
+mrb_load_irep_cxt(mrb_state *mrb, const uint8_t *bin, mrbc_context *c)
+{
+  return load_irep(mrb, mrb_read_irep(mrb, bin), c);
 }
 
 MRB_API mrb_value
@@ -646,9 +662,9 @@ mrb_load_irep(mrb_state *mrb, const uint8_t *bin)
   return mrb_load_irep_cxt(mrb, bin, NULL);
 }
 
-#ifdef ENABLE_STDIO
+#ifndef MRB_DISABLE_STDIO
 
-MRB_API mrb_irep*
+mrb_irep*
 mrb_read_irep_file(mrb_state *mrb, FILE* fp)
 {
   mrb_irep *irep = NULL;
@@ -682,25 +698,10 @@ irep_exit:
   return irep;
 }
 
-void mrb_codedump_all(mrb_state*, struct RProc*);
-
 MRB_API mrb_value
 mrb_load_irep_file_cxt(mrb_state *mrb, FILE* fp, mrbc_context *c)
 {
-  mrb_irep *irep = mrb_read_irep_file(mrb, fp);
-  mrb_value val;
-  struct RProc *proc;
-
-  if (!irep) {
-    irep_error(mrb);
-    return mrb_nil_value();
-  }
-  proc = mrb_proc_new(mrb, irep);
-  mrb_irep_decref(mrb, irep);
-  if (c && c->dump_result) mrb_codedump_all(mrb, proc);
-  if (c && c->no_exec) return mrb_obj_value(proc);
-  val = mrb_toplevel_run(mrb, proc);
-  return val;
+  return load_irep(mrb, mrb_read_irep_file(mrb, fp), c);
 }
 
 MRB_API mrb_value
@@ -708,4 +709,4 @@ mrb_load_irep_file(mrb_state *mrb, FILE* fp)
 {
   return mrb_load_irep_file_cxt(mrb, fp, NULL);
 }
-#endif /* ENABLE_STDIO */
+#endif /* MRB_DISABLE_STDIO */

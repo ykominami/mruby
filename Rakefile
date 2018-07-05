@@ -5,10 +5,12 @@ MRUBY_ROOT = File.dirname(File.expand_path(__FILE__))
 MRUBY_BUILD_HOST_IS_CYGWIN = RUBY_PLATFORM.include?('cygwin')
 MRUBY_BUILD_HOST_IS_OPENBSD = RUBY_PLATFORM.include?('openbsd')
 
+$LOAD_PATH << File.join(MRUBY_ROOT, "lib")
+
 # load build systems
-load "#{MRUBY_ROOT}/tasks/ruby_ext.rake"
-load "#{MRUBY_ROOT}/tasks/mruby_build.rake"
-load "#{MRUBY_ROOT}/tasks/mrbgem_spec.rake"
+require "mruby-core-ext"
+require "mruby/build"
+require "mruby/gem"
 
 # load configuration file
 MRUBY_CONFIG = (ENV['MRUBY_CONFIG'] && ENV['MRUBY_CONFIG'] != '') ? ENV['MRUBY_CONFIG'] : "#{MRUBY_ROOT}/build_config.rb"
@@ -27,6 +29,8 @@ load "#{MRUBY_ROOT}/tasks/mrbgems.rake"
 load "#{MRUBY_ROOT}/tasks/libmruby.rake"
 
 load "#{MRUBY_ROOT}/tasks/benchmark.rake"
+
+load "#{MRUBY_ROOT}/tasks/gitlab.rake"
 
 ##############################
 # generic build targets, rules
@@ -114,10 +118,21 @@ task :all => depfiles do
 end
 
 desc "run all mruby tests"
-task :test => ["all"] do
-  MRuby.each_target do
-    run_test if test_enabled?
+MRuby.each_target do
+  next unless test_enabled?
+
+  t = :"test_#{self.name}"
+  task t => ["all"] do
+    run_test
   end
+  task :test => t
+
+  next unless bintest_enabled?
+  t = :"bintest_#{self.name}"
+  task t => ["all"] do
+    run_bintest
+  end
+  task :test => t
 end
 
 desc "clean all built and in-repo installed artifacts"
@@ -139,5 +154,10 @@ end
 
 desc 'generate document'
 task :doc do
-  load "#{MRUBY_ROOT}/doc/language/generator.rb"
+  begin
+    sh "mrbdoc"
+  rescue
+    puts "ERROR: To generate documents, you should install yard-mruby gem."
+    puts "  $ gem install yard-mruby"
+  end
 end
