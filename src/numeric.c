@@ -374,6 +374,14 @@ flodivmod(mrb_state *mrb, double x, double y, mrb_float *divp, mrb_float *modp)
   }
   else {
     mod = fmod(x, y);
+    if (isinf(x) && !isinf(y) && !isnan(y))
+      div = x;
+    else
+      div = (x - mod) / y;
+    if (y*mod < 0) {
+      mod += y;
+      div -= 1.0;
+    }
   }
   if (isinf(x) && !isinf(y)) {
     div = x;
