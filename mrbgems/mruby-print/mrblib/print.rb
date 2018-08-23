@@ -45,7 +45,7 @@ module Kernel
       __printstr__ "\n"
       i += 1
     end
-    args.__svalue
+    args[0]
   end
 
   unless Kernel.respond_to?(:sprintf)
