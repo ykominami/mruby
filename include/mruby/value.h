@@ -72,12 +72,11 @@ MRB_API double mrb_float_read(const char*, char**);
 #endif
 #endif
 
-#ifdef _MSC_VER
+#if defined _MSC_VER && _MSC_VER < 1900
 # ifndef __cplusplus
 #  define inline __inline
 # endif
-# if _MSC_VER < 1900
-#  include <stdarg.h>
+# include <stdarg.h>
 MRB_API int mrb_msvc_vsnprintf(char *s, size_t n, const char *format, va_list arg);
 MRB_API int mrb_msvc_snprintf(char *s, size_t n, const char *format, ...);
 # define vsnprintf(s, n, format, arg) mrb_msvc_vsnprintf(s, n, format, arg)
@@ -91,11 +90,7 @@ MRB_API int mrb_msvc_snprintf(char *s, size_t n, const char *format, ...);
 static const unsigned int IEEE754_INFINITY_BITS_SINGLE = 0x7F800000;
 #  define INFINITY (*(float *)&IEEE754_INFINITY_BITS_SINGLE)
 #  define NAN ((float)(INFINITY - INFINITY))
-# else
-#  include <inttypes.h>
 # endif
-#else
-# include <inttypes.h>
 #endif
 
 enum mrb_vtype {

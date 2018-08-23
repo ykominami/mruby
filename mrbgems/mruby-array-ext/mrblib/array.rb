@@ -1,4 +1,3 @@
-# coding: utf-8
 class Array
   ##
   # call-seq:
@@ -411,7 +410,7 @@ class Array
         self[i] = block.call(i)
         i += 1
       end
-    else 
+    else
       while i < len
         self[i] = arg0
         i += 1
@@ -685,7 +684,6 @@ class Array
     return to_enum :delete_if unless block
 
     idx = 0
-    len = self.size
     while idx < self.size do
       if block.call(self[idx])
         self.delete_at(idx)
