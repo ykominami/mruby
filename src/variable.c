@@ -732,24 +732,23 @@ mod_const_check(mrb_state *mrb, mrb_value mod)
 }
 
 static mrb_value
-const_get(mrb_state *mrb, struct RClass *base, mrb_sym sym, mrb_bool top)
+const_get(mrb_state *mrb, struct RClass *base, mrb_sym sym)
 {
   struct RClass *c = base;
   mrb_value v;
   mrb_bool retry = FALSE;
   mrb_value name;
-  struct RClass *oclass = mrb->object_class;
 
 L_RETRY:
   while (c) {
-    if (top || c != oclass || base == oclass) {
+    if (c->iv) {
       if (iv_get(mrb, c->iv, sym, &v))
         return v;
     }
     c = c->super;
   }
   if (!retry && base->tt == MRB_TT_MODULE) {
-    c = oclass;
+    c = mrb->object_class;
     retry = TRUE;
     goto L_RETRY;
   }
@@ -761,7 +760,7 @@ MRB_API mrb_value
 mrb_const_get(mrb_state *mrb, mrb_value mod, mrb_sym sym)
 {
   mod_const_check(mrb, mod);
-  return const_get(mrb, mrb_class_ptr(mod), sym, FALSE);
+  return const_get(mrb, mrb_class_ptr(mod), sym);
 }
 
 mrb_value
@@ -791,12 +790,12 @@ mrb_vm_const_get(mrb_state *mrb, mrb_sym sym)
   proc = mrb->c->ci->proc;
   while (proc) {
     c2 = MRB_PROC_TARGET_CLASS(proc);
-    if (c2 && iv_get(mrb, c2->iv, sym, &v)) { 
+    if (c2 && iv_get(mrb, c2->iv, sym, &v)) {
       return v;
     }
     proc = proc->upper;
   }
-  return const_get(mrb, c, sym, TRUE);
+  return const_get(mrb, c, sym);
 }
 
 MRB_API void
@@ -989,25 +988,25 @@ struct csym_arg {
   struct RClass *c;
   mrb_sym sym;
 };
- 
+
 static int
 csym_i(mrb_state *mrb, mrb_sym sym, mrb_value v, void *p)
 {
   struct csym_arg *a = (struct csym_arg*)p;
   struct RClass *c = a->c;
- 
+
   if (mrb_type(v) == c->tt && mrb_class_ptr(v) == c) {
     a->sym = sym;
     return 1;     /* stop iteration */
   }
   return 0;
 }
- 
+
 static mrb_sym
 find_class_sym(mrb_state *mrb, struct RClass *outer, struct RClass *c)
 {
   struct csym_arg arg;
- 
+
   if (!outer) return 0;
   if (outer == c) return 0;
   arg.c = c;
