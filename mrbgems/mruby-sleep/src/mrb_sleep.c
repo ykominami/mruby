@@ -29,7 +29,7 @@
 #ifdef _WIN32
     #include <windows.h>
     #define sleep(x) Sleep(x * 1000)
-    #define usleep(x) Sleep(((x)<1000) ? 1 : ((x)/1000))
+    #define usleep(x) Sleep((DWORD)((x)<1000) ? 1 : ((x)/1000))
 #else
     #include <unistd.h>
     #include <sys/time.h>
@@ -51,7 +51,7 @@ mrb_f_sleep(mrb_state *mrb, mrb_value self)
         usleep(sec * 1000000);
     }
     else {
-        mrb_raise(mrb, E_ARGUMENT_ERROR, "time interval must be positive integer");
+        mrb_raise(mrb, E_ARGUMENT_ERROR, "time interval must not be negative");
     }
 #else
     mrb_int sec;
@@ -60,7 +60,7 @@ mrb_f_sleep(mrb_state *mrb, mrb_value self)
     if (sec >= 0) {
         sleep(sec);
     } else {
-        mrb_raise(mrb, E_ARGUMENT_ERROR, "time interval must be positive integer");
+        mrb_raise(mrb, E_ARGUMENT_ERROR, "time interval must not be negative");
     }
 #endif
     end = time(0) - beg;
@@ -94,7 +94,7 @@ mrb_f_usleep(mrb_state *mrb, mrb_value self)
     if (usec >= 0) {
         usleep(usec);
     } else {
-        mrb_raise(mrb, E_ARGUMENT_ERROR, "time interval must be positive integer");
+        mrb_raise(mrb, E_ARGUMENT_ERROR, "time interval must not be negative integer");
     }
 
 #ifdef _WIN32

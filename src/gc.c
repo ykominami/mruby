@@ -274,9 +274,29 @@ mrb_free(mrb_state *mrb, void *p)
   (mrb->allocf)(mrb, p, 0, mrb->allocf_ud);
 }
 
+static mrb_bool
+heap_p(mrb_gc *gc, struct RBasic *object)
+{
+  mrb_heap_page* page;
+
+  page = gc->heaps;
+  while (page) {
+    RVALUE *p;
+
+    p = objects(page);
+    if (&p[0].as.basic <= object && object <= &p[MRB_HEAP_PAGE_SIZE].as.basic) {
+      return TRUE;
+    }
+    page = page->next;
+  }
+  return FALSE;
+}
+
 MRB_API mrb_bool
 mrb_object_dead_p(mrb_state *mrb, struct RBasic *object) {
-  return is_dead(&mrb->gc, object);
+  mrb_gc *gc = &mrb->gc;
+  if (!heap_p(gc, object)) return TRUE;
+  return is_dead(gc, object);
 }
 
 static void
@@ -719,14 +739,7 @@ gc_mark_children(mrb_state *mrb, mrb_gc *gc, struct RBasic *obj)
     break;
 
   case MRB_TT_RANGE:
-    {
-      struct RRange *r = (struct RRange*)obj;
-
-      if (r->edges) {
-        mrb_gc_mark_value(mrb, r->edges->beg);
-        mrb_gc_mark_value(mrb, r->edges->end);
-      }
-    }
+    mrb_gc_mark_range(mrb, (struct RRange*)obj);
     break;
 
   default:
@@ -788,7 +801,8 @@ obj_free(mrb_state *mrb, struct RBasic *obj, int end)
 
       if (MRB_ENV_STACK_SHARED_P(e)) {
         /* cannot be freed */
-        return;
+        e->stack = NULL;
+        break;
       }
       mrb_free(mrb, e->stack);
       e->stack = NULL;
@@ -800,13 +814,13 @@ obj_free(mrb_state *mrb, struct RBasic *obj, int end)
       struct mrb_context *c = ((struct RFiber*)obj)->cxt;
 
       if (c && c != mrb->root_c) {
-        mrb_callinfo *ci = c->ci;
-        mrb_callinfo *ce = c->cibase;
+        if (!end && c->status != MRB_FIBER_TERMINATED) {
+          mrb_callinfo *ci = c->ci;
+          mrb_callinfo *ce = c->cibase;
 
-        if (!end) {
           while (ce <= ci) {
             struct REnv *e = ci->env;
-            if (e && !is_dead(&mrb->gc, e) &&
+            if (e && !mrb_object_dead_p(mrb, (struct RBasic*)e) &&
                 e->tt == MRB_TT_ENV && MRB_ENV_STACK_SHARED_P(e)) {
               mrb_env_unshare(mrb, e);
             }
@@ -849,7 +863,7 @@ obj_free(mrb_state *mrb, struct RBasic *obj, int end)
     break;
 
   case MRB_TT_RANGE:
-    mrb_free(mrb, ((struct RRange*)obj)->edges);
+    mrb_gc_free_range(mrb, ((struct RRange*)obj));
     break;
 
   case MRB_TT_DATA:

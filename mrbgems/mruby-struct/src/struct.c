@@ -213,7 +213,7 @@ make_struct(mrb_state *mrb, mrb_value name, mrb_value members, struct RClass *kl
   }
   else {
     /* old style: should we warn? */
-    name = mrb_str_to_str(mrb, name);
+    mrb_to_str(mrb, name);
     id = mrb_obj_to_sym(mrb, name);
     if (!is_const_id(mrb, mrb_sym2name_len(mrb, id, NULL))) {
       mrb_name_error(mrb, id, "identifier %S needs to be constant", name);
@@ -399,7 +399,7 @@ struct_aref_sym(mrb_state *mrb, mrb_value obj, mrb_sym id)
       return ptr[i];
     }
   }
-  mrb_raisef(mrb, E_INDEX_ERROR, "'%S' is not a struct member", mrb_sym2str(mrb, id));
+  mrb_name_error(mrb, id, "no member '%S' in struct", mrb_sym2str(mrb, id));
   return mrb_nil_value();       /* not reached */
 }
 

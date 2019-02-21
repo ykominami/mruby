@@ -65,7 +65,7 @@ mrb_class_name_class(mrb_state *mrb, struct RClass *outer, struct RClass *c, mrb
   else {
     name = mrb_class_path(mrb, outer);
     if (mrb_nil_p(name)) {      /* unnamed outer class */
-      if (outer != mrb->object_class) {
+      if (outer != mrb->object_class && outer != c) {
         mrb_obj_iv_set(mrb, (struct RObject*)c, mrb_intern_lit(mrb, "__outer__"),
                        mrb_obj_value(outer));
       }
@@ -492,34 +492,31 @@ mrb_notimplement_m(mrb_state *mrb, mrb_value self)
   return mrb_nil_value();
 }
 
-static mrb_value
-check_type(mrb_state *mrb, mrb_value val, enum mrb_vtype t, const char *c, const char *m)
-{
-  mrb_value tmp;
-
-  tmp = mrb_check_convert_type(mrb, val, t, c, m);
-  if (mrb_nil_p(tmp)) {
-    mrb_raisef(mrb, E_TYPE_ERROR, "expected %S", mrb_str_new_cstr(mrb, c));
-  }
-  return tmp;
-}
+#define CHECK_TYPE(mrb, val, t, c) do { \
+  if (mrb_type(val) != (t)) {\
+    mrb_raisef(mrb, E_TYPE_ERROR, "expected %S", mrb_str_new_lit(mrb, c));\
+  }\
+} while (0)
 
 static mrb_value
 to_str(mrb_state *mrb, mrb_value val)
 {
-  return check_type(mrb, val, MRB_TT_STRING, "String", "to_str");
+  CHECK_TYPE(mrb, val, MRB_TT_STRING, "String");
+  return val;
 }
 
 static mrb_value
 to_ary(mrb_state *mrb, mrb_value val)
 {
-  return check_type(mrb, val, MRB_TT_ARRAY, "Array", "to_ary");
+  CHECK_TYPE(mrb, val, MRB_TT_ARRAY, "Array");
+  return val;
 }
 
 static mrb_value
 to_hash(mrb_state *mrb, mrb_value val)
 {
-  return check_type(mrb, val, MRB_TT_HASH, "Hash", "to_hash");
+  CHECK_TYPE(mrb, val, MRB_TT_HASH, "Hash");
+  return val;
 }
 
 #define to_sym(mrb, ss) mrb_obj_to_sym(mrb, ss)
@@ -1701,7 +1698,8 @@ mrb_class_name(mrb_state *mrb, struct RClass* c)
 {
   mrb_value path = mrb_class_path(mrb, c);
   if (mrb_nil_p(path)) {
-    path = mrb_str_new_lit(mrb, "#<Class:");
+    path = c->tt == MRB_TT_MODULE ? mrb_str_new_lit(mrb, "#<Module:") :
+                                    mrb_str_new_lit(mrb, "#<Class:");
     mrb_str_concat(mrb, path, mrb_ptr_to_str(mrb, c));
     mrb_str_cat_lit(mrb, path, ">");
   }
@@ -1817,7 +1815,7 @@ mrb_define_alias(mrb_state *mrb, struct RClass *klass, const char *name1, const 
  * show information on the thing we're attached to as well.
  */
 
-static mrb_value
+mrb_value
 mrb_mod_to_s(mrb_state *mrb, mrb_value klass)
 {
   mrb_value str;
@@ -1971,7 +1969,7 @@ mrb_mod_const_get(mrb_state *mrb, mrb_value mod)
   }
 
   /* const get with class path string */
-  path = mrb_string_type(mrb, path);
+  path = mrb_ensure_string_type(mrb, path);
   ptr = RSTRING_PTR(path);
   len = RSTRING_LEN(path);
   off = 0;

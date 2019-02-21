@@ -27,9 +27,9 @@ class Hash
     length = object.length
     if length == 1
       o = object[0]
-      if o.respond_to?(:to_hash)
+      if Hash === o
         h = self.new
-        object[0].to_hash.each { |k, v| h[k] = v }
+        o.each { |k, v| h[k] = v }
         return h
       elsif o.respond_to?(:to_a)
         h = self.new
@@ -62,25 +62,6 @@ class Hash
 
   ##
   # call-seq:
-  #     Hash.try_convert(obj) -> hash or nil
-  #
-  # Try to convert <i>obj</i> into a hash, using to_hash method.
-  # Returns converted hash or nil if <i>obj</i> cannot be converted
-  # for any reason.
-  #
-  #     Hash.try_convert({1=>2})   # => {1=>2}
-  #     Hash.try_convert("1=>2")   # => nil
-  #
-  def self.try_convert(obj)
-    if obj.respond_to?(:to_hash)
-      obj.to_hash
-    else
-      nil
-    end
-  end
-
-  ##
-  # call-seq:
   #     hsh.merge!(other_hash)                                 -> hsh
   #     hsh.merge!(other_hash){|key, oldval, newval| block}    -> hsh
   #
@@ -101,7 +82,7 @@ class Hash
   #
 
   def merge!(other, &block)
-    raise TypeError, "can't convert argument into Hash" unless other.respond_to?(:to_hash)
+    raise TypeError, "Hash required (#{other.class} given)" unless Hash === other
     if block
       other.each_key{|k|
         self[k] = (self.has_key?(k))? block.call(k, self[k], other[k]): other[k]
@@ -126,12 +107,12 @@ class Hash
   #
 
   def compact!
-    h = {}
     keys = self.keys
     nk = keys.select{|k|
       self[k] != nil
     }
     return nil if (keys.size == nk.size)
+    h = {}
     nk.each {|k|
       h[k] = self[k]
     }
@@ -329,11 +310,7 @@ class Hash
   #     h1 < h1    #=> false
   #
   def <(hash)
-    begin
-      hash = hash.to_hash
-    rescue NoMethodError
-      raise TypeError, "can't convert #{hash.class} to Hash"
-    end
+    raise TypeError, "can't convert #{hash.class} to Hash" unless Hash === hash
     size < hash.size and all? {|key, val|
       hash.key?(key) and hash[key] == val
     }
@@ -353,11 +330,7 @@ class Hash
   #     h1 <= h1   #=> true
   #
   def <=(hash)
-    begin
-      hash = hash.to_hash
-    rescue NoMethodError
-      raise TypeError, "can't convert #{hash.class} to Hash"
-    end
+    raise TypeError, "can't convert #{hash.class} to Hash" unless Hash === hash
     size <= hash.size and all? {|key, val|
       hash.key?(key) and hash[key] == val
     }
@@ -377,11 +350,7 @@ class Hash
   #     h1 > h1    #=> false
   #
   def >(hash)
-    begin
-      hash = hash.to_hash
-    rescue NoMethodError
-      raise TypeError, "can't convert #{hash.class} to Hash"
-    end
+    raise TypeError, "can't convert #{hash.class} to Hash" unless Hash === hash
     size > hash.size and hash.all? {|key, val|
       key?(key) and self[key] == val
     }
@@ -401,11 +370,7 @@ class Hash
   #     h1 >= h1   #=> true
   #
   def >=(hash)
-    begin
-      hash = hash.to_hash
-    rescue NoMethodError
-      raise TypeError, "can't convert #{hash.class} to Hash"
-    end
+    raise TypeError, "can't convert #{hash.class} to Hash" unless Hash === hash
     size >= hash.size and hash.all? {|key, val|
       key?(key) and self[key] == val
     }
@@ -461,9 +426,9 @@ class Hash
     return to_enum :transform_keys! unless block
     self.keys.each do |k|
       value = self[k]
-      new_key = block.call(k)
       self.__delete(k)
-      self[new_key] = value
+      k = block.call(k) if block
+      self[k] = value
     end
     self
   end
@@ -486,6 +451,7 @@ class Hash
     end
     hash
   end
+
   ##
   # call-seq:
   #    hsh.transform_values! {|key| block } -> hsh

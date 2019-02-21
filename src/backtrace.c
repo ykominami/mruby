@@ -17,8 +17,8 @@
 
 struct backtrace_location {
   int lineno;
-  const char *filename;
   mrb_sym method_id;
+  const char *filename;
 };
 
 typedef void (*each_backtrace_func)(mrb_state*, struct backtrace_location*, void*);
@@ -206,7 +206,6 @@ packed_backtrace(mrb_state *mrb)
   each_backtrace(mrb, ciidx, mrb->c->ci->pc, count_backtrace_i, &len);
   size = len * sizeof(struct backtrace_location);
   ptr = mrb_malloc(mrb, size);
-  if (ptr) memset(ptr, 0, size);
   backtrace = mrb_data_object_alloc(mrb, NULL, ptr, &bt_type);
   backtrace->flags = (unsigned int)len;
   each_backtrace(mrb, ciidx, mrb->c->ci->pc, pack_backtrace_i, &ptr);

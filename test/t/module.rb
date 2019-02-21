@@ -231,7 +231,7 @@ assert('Module#const_set', '15.2.2.4.23') do
     Const4Test4ConstSet = 42
   end
 
-  assert_true Test4ConstSet.const_set(:Const4Test4ConstSet, 23)
+  assert_equal 23, Test4ConstSet.const_set(:Const4Test4ConstSet, 23)
   assert_equal 23, Test4ConstSet.const_get(:Const4Test4ConstSet)
 end
 
@@ -706,6 +706,15 @@ end
 assert('module with non-class/module outer raises TypeError') do
   assert_raise(TypeError) { module 0::M1 end }
   assert_raise(TypeError) { module []::M2 end }
+end
+
+assert('module to return the last value') do
+  m = module M; :m end
+  assert_equal(m, :m)
+end
+
+assert('module to return nil if body is empty') do
+  assert_nil(module M end)
 end
 
 assert('get constant of parent module in singleton class; issue #3568') do
