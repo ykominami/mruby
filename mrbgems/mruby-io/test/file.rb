@@ -1,15 +1,13 @@
 ##
 # File Test
 
-assert('File TEST SETUP') do
-  MRubyIOTestUtil.io_test_setup
-end
+MRubyIOTestUtil.io_test_setup
 
-assert('File', '15.2.21') do
+assert('File.class', '15.2.21') do
   assert_equal Class, File.class
 end
 
-assert('File', '15.2.21.2') do
+assert('File.superclass', '15.2.21.2') do
   assert_equal IO, File.superclass
 end
 
@@ -69,9 +67,6 @@ assert('File#flock') do
 end
 
 assert('File#mtime') do
-  unless Object.const_defined?(:Time)
-    skip "File#mtime require Time"
-  end
   begin
     File.open("#{$mrbtest_io_wfname}.mtime", 'w') do |f|
       assert_equal Time, f.mtime.class
@@ -207,6 +202,4 @@ assert('File.chmod') do
   end
 end
 
-assert('File TEST CLEANUP') do
-  assert_nil MRubyIOTestUtil.io_test_cleanup
-end
+MRubyIOTestUtil.io_test_cleanup

@@ -161,6 +161,9 @@ assert('String#[]=') do
    assert_equal 'aXc', e
   end
 
+  assert_raise(TypeError) { 'a'[0] = 1 }
+  assert_raise(TypeError) { 'a'[:a] = '1' }
+
   # length of args is 2
   a1 = 'abc'
   assert_raise(IndexError) do
@@ -197,6 +200,10 @@ assert('String#[]=') do
   assert_raise(IndexError) do
     b3['XX'] = 'Y'
   end
+
+  assert_raise(TypeError) { 'a'[:a, 0] = '1' }
+  assert_raise(TypeError) { 'a'[0, :a] = '1' }
+  assert_raise(TypeError) { 'a'[0, 1] = 1 }
 end
 
 assert('String#capitalize', '15.2.10.5.7') do
@@ -502,7 +509,9 @@ assert('String#rindex(UTF-8)', '15.2.10.5.31') do
   assert_equal nil, str.index("さ")
 end if UTF8STRING
 
-# 'String#scan', '15.2.10.5.32' will be tested in mrbgems.
+# assert('String#scan', '15.2.10.5.32') do
+#   # Not implemented yet
+# end
 
 assert('String#size', '15.2.10.5.33') do
   assert_equal 3, 'abc'.size
@@ -711,5 +720,11 @@ assert('String#freeze') do
   str = "hello"
   str.freeze
 
-  assert_raise(RuntimeError) { str.upcase! }
+  assert_raise(FrozenError) { str.upcase! }
+end
+
+assert('String literal concatenation') do
+  assert_equal 2, ("A" "B").size
+  assert_equal 3, ('A' "B" 'C').size
+  assert_equal 4, (%(A) "B#{?C}" "D").size
 end

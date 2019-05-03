@@ -220,6 +220,26 @@ parser_strdup(parser_state *p, const char *s)
 #undef strdup
 #define strdup(s) parser_strdup(p, s)
 
+static void
+dump_int(short i, char *s)
+{
+  char *p = s;
+  char *t = s;
+
+  while (i > 0) {
+    *p++ = (i % 10)+'0';
+    i /= 10;
+  }
+  if (p == s) *p++ = '0';
+  *p = 0;
+  p--;  /* point the last char */
+  while (t < p) {
+    char c = *t;
+    *t++ = *p;
+    *p-- = c;
+  }
+}
+
 /* xxx ----------------------------- */
 
 static node*
@@ -852,6 +872,87 @@ new_dstr(parser_state *p, node *a)
   return cons((node*)NODE_DSTR, a);
 }
 
+static int
+string_node_p(node *n)
+{
+  return (int)((enum node_type)(intptr_t)n->car == NODE_STR);
+}
+
+static node*
+composite_string_node(parser_state *p, node *a, node *b)
+{
+  size_t newlen = (size_t)a->cdr + (size_t)b->cdr;
+  char *str = (char*)mrb_pool_realloc(p->pool, a->car, (size_t)a->cdr + 1, newlen + 1);
+  memcpy(str + (size_t)a->cdr, b->car, (size_t)b->cdr);
+  str[newlen] = '\0';
+  a->car = (node*)str;
+  a->cdr = (node*)newlen;
+  cons_free(b);
+  return a;
+}
+
+static node*
+concat_string(parser_state *p, node *a, node *b)
+{
+  if (string_node_p(a)) {
+    if (string_node_p(b)) {
+      /* a == NODE_STR && b == NODE_STR */
+      composite_string_node(p, a->cdr, b->cdr);
+      cons_free(b);
+      return a;
+    }
+    else {
+      /* a == NODE_STR && b == NODE_DSTR */
+
+      if (string_node_p(b->cdr->car)) {
+        /* a == NODE_STR && b->[NODE_STR, ...] */
+        composite_string_node(p, a->cdr, b->cdr->car->cdr);
+        cons_free(b->cdr->car);
+        b->cdr->car = a;
+        return b;
+      }
+    }
+  }
+  else if (string_node_p(b)) {
+    /* a == NODE_DSTR && b == NODE_STR */
+
+    node *c;
+    for (c = a; c->cdr != NULL; c = c->cdr) ;
+    if (string_node_p(c->car)) {
+      /* a->[..., NODE_STR] && b == NODE_STR */
+      composite_string_node(p, c->car->cdr, b->cdr);
+      cons_free(b);
+      return a;
+    }
+
+    push(a, b);
+    return a;
+  }
+  else {
+    /* a == NODE_DSTR && b == NODE_DSTR */
+
+    node *c, *d;
+    for (c = a; c->cdr != NULL; c = c->cdr) ;
+    if (string_node_p(c->car) && string_node_p(b->cdr->car)) {
+      /* a->[..., NODE_STR] && b->[NODE_STR, ...] */
+      d = b->cdr;
+      cons_free(b);
+      composite_string_node(p, c->car->cdr, d->car->cdr);
+      cons_free(d->car);
+      c->cdr = d->cdr;
+      cons_free(d);
+      return a;
+    }
+    else {
+      c->cdr = b->cdr;
+      cons_free(b);
+      return a;
+    }
+  }
+
+  return new_dstr(p, list2(a, b));
+}
+
 /* (:str . (s . len)) */
 static node*
 new_xstr(parser_state *p, const char *s, int len)
@@ -1200,7 +1301,7 @@ heredoc_end(parser_state *p)
 %token <nd>  tNTH_REF tBACK_REF
 %token <num> tREGEXP_END
 
-%type <nd> singleton string string_rep string_interp xstring regexp
+%type <nd> singleton string string_fragment string_rep string_interp xstring regexp
 %type <nd> literal numeric cpath symbol
 %type <nd> top_compstmt top_stmts top_stmt
 %type <nd> bodystmt compstmt stmts stmt expr arg primary command command_call method_call
@@ -2852,7 +2953,14 @@ literal         : numeric
                 | symbols
                 ;
 
-string          : tCHAR
+string          : string_fragment
+                | string string_fragment
+                    {
+                      $$ = concat_string(p, $1, $2);
+                    }
+                ;
+
+string_fragment : tCHAR
                 | tSTRING
                 | tSTRING_BEG tSTRING
                     {
@@ -3074,7 +3182,7 @@ var_ref         : variable
                     }
                 | keyword__FILE__
                     {
-                      const char *fn = p->filename;
+                      const char *fn = mrb_sym2name_len(p->mrb, p->filename_sym, NULL);
                       if (!fn) {
                         fn = "(null)";
                       }
@@ -3084,7 +3192,7 @@ var_ref         : variable
                     {
                       char buf[16];
 
-                      snprintf(buf, sizeof(buf), "%d", p->lineno);
+                      dump_int(p->lineno, buf);
                       $$ = new_int(p, buf, 10);
                     }
                 | keyword__ENCODING__
@@ -3478,7 +3586,7 @@ assoc           : arg tASSOC arg
                       void_expr_error(p, $3);
                       $$ = cons(new_sym(p, $1), $3);
                     }
-                | string tLABEL_TAG arg
+                | string_fragment tLABEL_TAG arg
                     {
                       void_expr_error(p, $3);
                       if ($1->car == (node*)NODE_DSTR) {
@@ -3583,8 +3691,9 @@ yyerror(parser_state *p, const char *s)
 
   if (! p->capture_errors) {
 #ifndef MRB_DISABLE_STDIO
-    if (p->filename) {
-      fprintf(stderr, "%s:%d:%d: %s\n", p->filename, p->lineno, p->column, s);
+    if (p->filename_sym) {
+      const char *filename = mrb_sym2name_len(p->mrb, p->filename_sym, NULL);
+      fprintf(stderr, "%s:%d:%d: %s\n", filename, p->lineno, p->column, s);
     }
     else {
       fprintf(stderr, "line %d:%d: %s\n", p->lineno, p->column, s);
@@ -3603,11 +3712,13 @@ yyerror(parser_state *p, const char *s)
 }
 
 static void
-yyerror_i(parser_state *p, const char *fmt, int i)
+yyerror_c(parser_state *p, const char *msg, char c)
 {
   char buf[256];
 
-  snprintf(buf, sizeof(buf), fmt, i);
+  strncpy(buf, msg, sizeof(buf) - 2);
+  buf[sizeof(buf) - 2] = '\0';
+  strncat(buf, &c, 1);
   yyerror(p, buf);
 }
 
@@ -3619,11 +3730,12 @@ yywarn(parser_state *p, const char *s)
 
   if (! p->capture_errors) {
 #ifndef MRB_DISABLE_STDIO
-    if (p->filename) {
-      fprintf(stderr, "%s:%d:%d: %s\n", p->filename, p->lineno, p->column, s);
+    if (p->filename_sym) {
+      const char *filename = mrb_sym2name_len(p->mrb, p->filename_sym, NULL);
+      fprintf(stderr, "%s:%d:%d: warning: %s\n", filename, p->lineno, p->column, s);
     }
     else {
-      fprintf(stderr, "line %d:%d: %s\n", p->lineno, p->column, s);
+      fprintf(stderr, "line %d:%d: warning: %s\n", p->lineno, p->column, s);
     }
 #endif
   }
@@ -3645,11 +3757,14 @@ yywarning(parser_state *p, const char *s)
 }
 
 static void
-yywarning_s(parser_state *p, const char *fmt, const char *s)
+yywarning_s(parser_state *p, const char *msg, const char *s)
 {
   char buf[256];
 
-  snprintf(buf, sizeof(buf), fmt, s);
+  strncpy(buf, msg, sizeof(buf) - 1);
+  buf[sizeof(buf) - 1] = '\0';
+  strncat(buf, ": ", sizeof(buf) - strlen(buf) - 1);
+  strncat(buf, s, sizeof(buf) - strlen(buf) - 1);
   yywarning(p, buf);
 }
 
@@ -3661,10 +3776,10 @@ backref_error(parser_state *p, node *n)
   c = intn(n->car);
 
   if (c == NODE_NTH_REF) {
-    yyerror_i(p, "can't set variable $%" MRB_PRId, intn(n->cdr));
+    yyerror_c(p, "can't set variable $", (char)intn(n->cdr)+'0');
   }
   else if (c == NODE_BACK_REF) {
-    yyerror_i(p, "can't set variable $%c", intn(n->cdr));
+    yyerror_c(p, "can't set variable $", (char)intn(n->cdr));
   }
   else {
     mrb_bug(p->mrb, "Internal error in backref_error() : n=>car == %S", mrb_fixnum_value(c));
@@ -4208,8 +4323,17 @@ parse_string(parser_state *p)
       }
       if (c < 0) {
         char buf[256];
-        snprintf(buf, sizeof(buf), "can't find heredoc delimiter \"%s\" anywhere before EOF", hinf->term);
-        yyerror(p, buf);
+        const char s1[] = "can't find heredoc delimiter \"";
+        const char s2[] = "\" anywhere before EOF";
+
+        if (sizeof(s1)+sizeof(s2)+strlen(hinf->term)+1 >= sizeof(buf)) {
+          yyerror(p, "can't find heredoc delimiter anywhere before EOF");
+        } else {
+          strcpy(buf, s1);
+          strcat(buf, hinf->term);
+          strcat(buf, s2);
+          yyerror(p, buf);
+        }
         return 0;
       }
       pylval.nd = new_str(p, tok(p), toklen(p));
@@ -4359,9 +4483,14 @@ parse_string(parser_state *p)
     pushback(p, re_opt);
     if (toklen(p)) {
       char msg[128];
+
+      strcpy(msg, "unknown regexp option");
       tokfix(p);
-      snprintf(msg, sizeof(msg), "unknown regexp option%s - %s",
-          toklen(p) > 1 ? "s" : "", tok(p));
+      if (toklen(p) > 1) {
+        strcat(msg, "s");
+      }
+      strcat(msg, " - ");
+      strncat(msg, tok(p), sizeof(msg) - strlen(msg) - 1);
       yyerror(p, msg);
     }
     if (f != 0) {
@@ -4568,7 +4697,7 @@ parser_yylex(parser_state *p)
       }
       pushback(p, c);
       if (IS_SPCARG(c)) {
-        yywarning(p, "`**' interpreted as argument prefix");
+        yywarning(p, "'**' interpreted as argument prefix");
         c = tDSTAR;
       }
       else if (IS_BEG()) {
@@ -4789,7 +4918,10 @@ parser_yylex(parser_state *p)
         }
         if (c2) {
           char buf[256];
-          snprintf(buf, sizeof(buf), "invalid character syntax; use ?\\%c", c2);
+          char cc = (char)c2;
+
+          strcpy(buf, "invalid character syntax; use ?\\");
+          strncat(buf, &cc, 1);
           yyerror(p, buf);
         }
       }
@@ -4800,10 +4932,10 @@ parser_yylex(parser_state *p)
     }
     newtok(p);
     /* need support UTF-8 if configured */
-    if ((isalnum(c) || c == '_')) {
+    if ((ISALNUM(c) || c == '_')) {
       int c2 = nextc(p);
       pushback(p, c2);
-      if ((isalnum(c2) || c2 == '_')) {
+      if ((ISALNUM(c2) || c2 == '_')) {
         goto ternary;
       }
     }
@@ -5162,12 +5294,12 @@ parser_yylex(parser_state *p)
     pushback(p, c);
     if (nondigit) {
       trailing_uc:
-      yyerror_i(p, "trailing '%c' in number", nondigit);
+      yyerror_c(p, "trailing non digit in number: ", (char)nondigit);
     }
     tokfix(p);
     if (is_float) {
 #ifdef MRB_WITHOUT_FLOAT
-      yywarning_s(p, "floating point numbers are not supported", tok(p));
+      yywarning(p, "floating point numbers are not supported");
       pylval.nd = new_int(p, "0", 10);
       return tINTEGER;
 #else
@@ -5177,10 +5309,10 @@ parser_yylex(parser_state *p)
       errno = 0;
       d = mrb_float_read(tok(p), &endp);
       if (d == 0 && endp == tok(p)) {
-        yywarning_s(p, "corrupted float value %s", tok(p));
+        yywarning_s(p, "corrupted float value", tok(p));
       }
       else if (errno == ERANGE) {
-        yywarning_s(p, "float %s out of range", tok(p));
+        yywarning_s(p, "float out of range", tok(p));
         errno = 0;
       }
       pylval.nd = new_float(p, tok(p));
@@ -5371,7 +5503,7 @@ parser_yylex(parser_state *p)
       }
       else {
         term = nextc(p);
-        if (isalnum(term)) {
+        if (ISALNUM(term)) {
           yyerror(p, "unknown type of %string");
           return 0;
         }
@@ -5515,14 +5647,14 @@ parser_yylex(parser_state *p)
       do {
         tokadd(p, c);
         c = nextc(p);
-      } while (c >= 0 && isdigit(c));
+      } while (c >= 0 && ISDIGIT(c));
       pushback(p, c);
       if (last_state == EXPR_FNAME) goto gvar;
       tokfix(p);
       {
         unsigned long n = strtoul(tok(p), NULL, 10);
         if (n > INT_MAX) {
-          yyerror_i(p, "capture group index must be <= %d", INT_MAX);
+          yyerror(p, "capture group index must be <= " MRB_STRINGIZE(INT_MAX));
           return 0;
         }
         pylval.nd = new_nth_ref(p, (int)n);
@@ -5557,12 +5689,12 @@ parser_yylex(parser_state *p)
         }
         return 0;
       }
-      else if (isdigit(c)) {
+      else if (ISDIGIT(c)) {
         if (p->tidx == 1) {
-          yyerror_i(p, "'@%c' is not allowed as an instance variable name", c);
+          yyerror_c(p, "wrong instance variable name: @", c);
         }
         else {
-          yyerror_i(p, "'@@%c' is not allowed as a class variable name", c);
+          yyerror_c(p, "wrong class variable name: @@", c);
         }
         return 0;
       }
@@ -5578,7 +5710,15 @@ parser_yylex(parser_state *p)
 
     default:
       if (!identchar(c)) {
-        yyerror_i(p,  "Invalid char '\\x%02X' in expression", c);
+        char buf[36];
+        const char s[] = "Invalid char in expression: 0x";
+        const char hexdigits[] = "0123456789ABCDEF";
+
+        strcpy(buf, s);
+        buf[sizeof(s)-1] = hexdigits[(c & 0xf0) >> 4];
+        buf[sizeof(s)]   = hexdigits[(c & 0x0f)];
+        buf[sizeof(s)+1] = 0;
+        yyerror(p, buf);
         goto retry;
       }
 
@@ -5714,7 +5854,7 @@ parser_yylex(parser_state *p)
       mrb_sym ident = intern_cstr(tok(p));
 
       pylval.id = ident;
-      if (last_state != EXPR_DOT && islower(tok(p)[0]) && local_var_p(p, ident)) {
+      if (last_state != EXPR_DOT && ISLOWER(tok(p)[0]) && local_var_p(p, ident)) {
         p->lstate = EXPR_END;
       }
     }
@@ -5924,7 +6064,7 @@ mrb_parser_set_filename(struct mrb_parser_state *p, const char *f)
   mrb_sym* new_table;
 
   sym = mrb_intern_cstr(p->mrb, f);
-  p->filename = mrb_sym2name_len(p->mrb, sym, NULL);
+  p->filename_sym = sym;
   p->lineno = (p->filename_table_length > 0)? 0 : 1;
 
   for (i = 0; i < p->filename_table_length; ++i) {
@@ -5948,11 +6088,11 @@ mrb_parser_set_filename(struct mrb_parser_state *p, const char *f)
   p->filename_table[p->filename_table_length - 1] = sym;
 }
 
-MRB_API char const*
+MRB_API mrb_sym
 mrb_parser_get_filename(struct mrb_parser_state* p, uint16_t idx) {
-  if (idx >= p->filename_table_length) return NULL;
+  if (idx >= p->filename_table_length) return 0;
   else {
-    return mrb_sym2name_len(p->mrb, p->filename_table[idx], NULL);
+    return p->filename_table[idx];
   }
 }
 
@@ -6007,11 +6147,12 @@ mrb_load_exec(mrb_state *mrb, struct mrb_parser_state *p, mrbc_context *c)
     if (c) c->parser_nerr = p->nerr;
     if (p->capture_errors) {
       char buf[256];
-      int n;
 
-      n = snprintf(buf, sizeof(buf), "line %d: %s\n",
-          p->error_buffer[0].lineno, p->error_buffer[0].message);
-      mrb->exc = mrb_obj_ptr(mrb_exc_new(mrb, E_SYNTAX_ERROR, buf, n));
+      strcpy(buf, "line ");
+      dump_int(p->error_buffer[0].lineno, buf+5);
+      strcat(buf, ": ");
+      strncat(buf, p->error_buffer[0].message, sizeof(buf) - strlen(buf) - 1);
+      mrb->exc = mrb_obj_ptr(mrb_exc_new(mrb, E_SYNTAX_ERROR, buf, strlen(buf)));
       mrb_parser_free(p);
       return mrb_undef_value();
     }

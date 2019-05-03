@@ -352,7 +352,9 @@ MRB_API mrb_value mrb_str_dup(mrb_state *mrb, mrb_value str);
 MRB_API mrb_value mrb_str_intern(mrb_state *mrb, mrb_value self);
 
 MRB_API mrb_value mrb_str_to_inum(mrb_state *mrb, mrb_value str, mrb_int base, mrb_bool badcheck);
+MRB_API mrb_value mrb_cstr_to_inum(mrb_state *mrb, const char *s, mrb_int base, mrb_bool badcheck);
 MRB_API double mrb_str_to_dbl(mrb_state *mrb, mrb_value str, mrb_bool badcheck);
+MRB_API double mrb_cstr_to_dbl(mrb_state *mrb, const char *s, mrb_bool badcheck);
 
 /*
  * Returns a converted string type.
@@ -430,9 +432,6 @@ mrb_value mrb_str_dump(mrb_state *mrb, mrb_value str);
  * Returns a printable version of str, surrounded by quote marks, with special characters escaped.
  */
 mrb_value mrb_str_inspect(mrb_state *mrb, mrb_value str);
-
-void mrb_noregexp(mrb_state *mrb, mrb_value self);
-void mrb_regexp_check(mrb_state *mrb, mrb_value obj);
 
 /* For backward compatibility */
 #define mrb_str_cat2(mrb, str, ptr) mrb_str_cat_cstr(mrb, str, ptr)

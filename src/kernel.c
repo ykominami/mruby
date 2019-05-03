@@ -434,24 +434,12 @@ mrb_obj_extend_m(mrb_state *mrb, mrb_value self)
 static mrb_value
 mrb_obj_freeze(mrb_state *mrb, mrb_value self)
 {
-  struct RBasic *b;
-
-  switch (mrb_type(self)) {
-    case MRB_TT_FALSE:
-    case MRB_TT_TRUE:
-    case MRB_TT_FIXNUM:
-    case MRB_TT_SYMBOL:
-#ifndef MRB_WITHOUT_FLOAT
-    case MRB_TT_FLOAT:
-#endif
-      return self;
-    default:
-      break;
-  }
-
-  b = mrb_basic_ptr(self);
-  if (!MRB_FROZEN_P(b)) {
-    MRB_SET_FROZEN_FLAG(b);
+  if (!mrb_immediate_p(self)) {
+    struct RBasic *b = mrb_basic_ptr(self);
+    if (!MRB_FROZEN_P(b)) {
+      MRB_SET_FROZEN_FLAG(b);
+      if (b->c->tt == MRB_TT_SCLASS) MRB_SET_FROZEN_FLAG(b->c);
+    }
   }
   return self;
 }
@@ -459,26 +447,7 @@ mrb_obj_freeze(mrb_state *mrb, mrb_value self)
 static mrb_value
 mrb_obj_frozen(mrb_state *mrb, mrb_value self)
 {
-  struct RBasic *b;
-
-  switch (mrb_type(self)) {
-    case MRB_TT_FALSE:
-    case MRB_TT_TRUE:
-    case MRB_TT_FIXNUM:
-    case MRB_TT_SYMBOL:
-#ifndef MRB_WITHOUT_FLOAT
-    case MRB_TT_FLOAT:
-#endif
-      return mrb_true_value();
-    default:
-      break;
-  }
-
-  b = mrb_basic_ptr(self);
-  if (!MRB_FROZEN_P(b)) {
-    return mrb_false_value();
-  }
-  return mrb_true_value();
+  return mrb_bool_value(mrb_immediate_p(self) || MRB_FROZEN_P(mrb_basic_ptr(self)));
 }
 
 /* 15.3.1.3.15 */
@@ -492,7 +461,7 @@ mrb_obj_frozen(mrb_state *mrb, mrb_value self)
  *  <code>Hash</code>. Any hash value that exceeds the capacity of a
  *  <code>Fixnum</code> will be truncated before being used.
  */
-MRB_API mrb_value
+static mrb_value
 mrb_obj_hash(mrb_state *mrb, mrb_value self)
 {
   return mrb_fixnum_value(mrb_obj_id(self));

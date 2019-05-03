@@ -25,6 +25,17 @@ assert('Module', '15.2.2') do
   assert_equal Class, Module.class
 end
 
+assert('Module#alias_method', '15.2.2.4.8') do
+  cls = Class.new do
+    def foo
+      "FOO"
+    end
+  end
+
+  assert_same(cls, cls.alias_method(:bar, :foo))
+  assert_equal("FOO", cls.new.bar)
+end
+
 # TODO not implemented ATM assert('Module.constants', '15.2.2.3.1') do
 
 assert('Module#ancestors', '15.2.2.4.9') do
@@ -210,6 +221,7 @@ assert('Module#const_defined?', '15.2.2.4.20') do
 
   assert_true Test4ConstDefined.const_defined?(:Const4Test4ConstDefined)
   assert_false Test4ConstDefined.const_defined?(:NotExisting)
+  assert_raise(NameError){ Test4ConstDefined.const_defined?(:wrong_name) }
 end
 
 assert('Module#const_get', '15.2.2.4.21') do
@@ -224,6 +236,7 @@ assert('Module#const_get', '15.2.2.4.21') do
   assert_raise(TypeError){ Test4ConstGet.const_get(123) }
   assert_raise(NameError){ Test4ConstGet.const_get(:I_DO_NOT_EXIST) }
   assert_raise(NameError){ Test4ConstGet.const_get("I_DO_NOT_EXIST::ME_NEITHER") }
+  assert_raise(NameError){ Test4ConstGet.const_get(:wrong_name) }
 end
 
 assert('Module#const_set', '15.2.2.4.23') do
@@ -233,6 +246,9 @@ assert('Module#const_set', '15.2.2.4.23') do
 
   assert_equal 23, Test4ConstSet.const_set(:Const4Test4ConstSet, 23)
   assert_equal 23, Test4ConstSet.const_get(:Const4Test4ConstSet)
+  ["", "wrongNAME", "Wrong-Name"].each do |n|
+    assert_raise(NameError) { Test4ConstSet.const_set(n, 1) }
+  end
 end
 
 assert('Module#remove_const', '15.2.2.4.40') do
@@ -240,21 +256,12 @@ assert('Module#remove_const', '15.2.2.4.40') do
     ExistingConst = 23
   end
 
-  result = Test4RemoveConst.module_eval { remove_const :ExistingConst }
-
-  name_error = false
-  begin
-    Test4RemoveConst.module_eval { remove_const :NonExistingConst }
-  rescue NameError
-    name_error = true
+  assert_equal 23, Test4RemoveConst.remove_const(:ExistingConst)
+  assert_false Test4RemoveConst.const_defined?(:ExistingConst)
+  assert_raise(NameError) { Test4RemoveConst.remove_const(:NonExistingConst) }
+  %i[x X!].each do |n|
+    assert_raise(NameError) { Test4RemoveConst.remove_const(n) }
   end
-
-  # Constant removed from Module
-  assert_false Test4RemoveConst.const_defined? :ExistingConst
-  # Return value of binding
-  assert_equal 23, result
-  # Name Error raised when Constant doesn't exist
-  assert_true name_error
 end
 
 assert('Module#const_missing', '15.2.2.4.22') do
@@ -644,11 +651,8 @@ assert('Module#to_s') do
   assert_equal 'SetOuter', SetOuter.to_s
   assert_equal 'SetOuter::SetInner', SetOuter::SetInner.to_s
 
-  mod = Module.new
-  cls = Class.new
-
-  assert_equal "#<Module:0x", mod.to_s[0,11]
-  assert_equal "#<Class:0x", cls.to_s[0,10]
+  assert_match "#<Module:0x*>", Module.new.to_s
+  assert_match "#<Class:0x*>", Class.new.to_s
 end
 
 assert('Module#inspect') do

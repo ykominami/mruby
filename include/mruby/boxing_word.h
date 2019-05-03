@@ -91,7 +91,7 @@ MRB_API mrb_value mrb_word_boxing_float_pool(struct mrb_state*, mrb_float);
 #define mrb_fixnum(o)  ((mrb_int)(o).value.i)
 #define mrb_symbol(o)  (o).value.sym
 
-static inline enum mrb_vtype
+MRB_INLINE enum mrb_vtype
 mrb_type(mrb_value o)
 {
   switch (o.w) {
@@ -116,29 +116,32 @@ mrb_type(mrb_value o)
 #define mrb_fixnum_p(o) ((o).value.i_flag == MRB_FIXNUM_FLAG)
 #define mrb_undef_p(o) ((o).w == MRB_Qundef)
 #define mrb_nil_p(o)  ((o).w == MRB_Qnil)
-
-#define BOXWORD_SET_VALUE(o, ttt, attr, v) do { \
-  switch (ttt) {\
-  case MRB_TT_FALSE:  (o).w = (v) ? MRB_Qfalse : MRB_Qnil; break;\
-  case MRB_TT_TRUE:   (o).w = MRB_Qtrue; break;\
-  case MRB_TT_UNDEF:  (o).w = MRB_Qundef; break;\
-  case MRB_TT_FIXNUM: (o).w = 0;(o).value.i_flag = MRB_FIXNUM_FLAG; (o).attr = (v); break;\
-  case MRB_TT_SYMBOL: (o).w = 0;(o).value.sym_flag = MRB_SYMBOL_FLAG; (o).attr = (v); break;\
-  default:            (o).w = 0; (o).attr = (v); if ((o).value.bp) (o).value.bp->tt = ttt; break;\
-  }\
-} while (0)
+#define mrb_false_p(o) ((o).w == MRB_Qfalse)
+#define mrb_true_p(o)  ((o).w == MRB_Qtrue)
 
 #ifndef MRB_WITHOUT_FLOAT
 #define SET_FLOAT_VALUE(mrb,r,v) ((r) = mrb_word_boxing_float_value(mrb, v))
 #endif
 #define SET_CPTR_VALUE(mrb,r,v) ((r) = mrb_word_boxing_cptr_value(mrb, v))
-#define SET_NIL_VALUE(r) BOXWORD_SET_VALUE(r, MRB_TT_FALSE, value.i, 0)
-#define SET_FALSE_VALUE(r) BOXWORD_SET_VALUE(r, MRB_TT_FALSE, value.i, 1)
-#define SET_TRUE_VALUE(r) BOXWORD_SET_VALUE(r, MRB_TT_TRUE, value.i, 1)
-#define SET_BOOL_VALUE(r,b) BOXWORD_SET_VALUE(r, (b) ? MRB_TT_TRUE : MRB_TT_FALSE, value.i, 1)
-#define SET_INT_VALUE(r,n) BOXWORD_SET_VALUE(r, MRB_TT_FIXNUM, value.i, (n))
-#define SET_SYM_VALUE(r,v) BOXWORD_SET_VALUE(r, MRB_TT_SYMBOL, value.sym, (v))
-#define SET_OBJ_VALUE(r,v) BOXWORD_SET_VALUE(r, (((struct RObject*)(v))->tt), value.p, (v))
-#define SET_UNDEF_VALUE(r) BOXWORD_SET_VALUE(r, MRB_TT_UNDEF, value.i, 0)
+#define SET_UNDEF_VALUE(r) ((r).w = MRB_Qundef)
+#define SET_NIL_VALUE(r) ((r).w = MRB_Qnil)
+#define SET_FALSE_VALUE(r) ((r).w = MRB_Qfalse)
+#define SET_TRUE_VALUE(r) ((r).w = MRB_Qtrue)
+#define SET_BOOL_VALUE(r,b) ((b) ? SET_TRUE_VALUE(r) : SET_FALSE_VALUE(r))
+#define SET_INT_VALUE(r,n) do {                                             \
+  (r).w = 0;                                                                \
+  (r).value.i_flag = MRB_FIXNUM_FLAG;                                       \
+  (r).value.i = (n);                                                        \
+} while (0)
+#define SET_SYM_VALUE(r,v)  do {                                            \
+  (r).w = 0;                                                                \
+  (r).value.sym_flag = MRB_SYMBOL_FLAG;                                     \
+  (r).value.sym = (v);                                                      \
+} while (0)
+#define SET_OBJ_VALUE(r,v) do {                                             \
+  (r).w = 0;                                                                \
+  (r).value.p = (v);                                                        \
+  if ((r).value.bp) (r).value.bp->tt = ((struct RObject*)(v))->tt;          \
+} while (0)
 
 #endif  /* MRUBY_BOXING_WORD_H */

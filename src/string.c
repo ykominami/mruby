@@ -493,20 +493,12 @@ str_index_str(mrb_state *mrb, mrb_value str, mrb_value str2, mrb_int offset)
   return mrb_str_index(mrb, str, ptr, len, offset);
 }
 
-static void
-check_frozen(mrb_state *mrb, struct RString *s)
-{
-  if (MRB_FROZEN_P(s)) {
-    mrb_raise(mrb, E_FROZEN_ERROR, "can't modify frozen string");
-  }
-}
-
 static mrb_value
 str_replace(mrb_state *mrb, struct RString *s1, struct RString *s2)
 {
   mrb_int len;
 
-  check_frozen(mrb, s1);
+  mrb_check_frozen(mrb, s1);
   if (s1 == s2) return mrb_obj_value(s1);
   s1->flags &= ~MRB_STR_NO_UTF;
   s1->flags |= s2->flags&MRB_STR_NO_UTF;
@@ -646,7 +638,7 @@ mrb_locale_from_utf8(const char *utf8, int len)
 MRB_API void
 mrb_str_modify(mrb_state *mrb, struct RString *s)
 {
-  check_frozen(mrb, s);
+  mrb_check_frozen(mrb, s);
   s->flags &= ~MRB_STR_NO_UTF;
   if (RSTR_SHARED_P(s)) {
     mrb_shared_string *shared = s->as.heap.aux.shared;
@@ -1005,20 +997,6 @@ mrb_string_value_len(mrb_state *mrb, mrb_value ptr)
   return RSTRING_LEN(ptr);
 }
 
-void
-mrb_noregexp(mrb_state *mrb, mrb_value self)
-{
-  mrb_raise(mrb, E_NOTIMP_ERROR, "Regexp class not implemented");
-}
-
-void
-mrb_regexp_check(mrb_state *mrb, mrb_value obj)
-{
-  if (mrb_regexp_p(mrb, obj)) {
-    mrb_noregexp(mrb, obj);
-  }
-}
-
 MRB_API mrb_value
 mrb_str_dup(mrb_state *mrb, mrb_value str)
 {
@@ -1034,7 +1012,6 @@ mrb_str_aref(mrb_state *mrb, mrb_value str, mrb_value indx)
 {
   mrb_int idx;
 
-  mrb_regexp_check(mrb, indx);
   switch (mrb_type(indx)) {
     case MRB_TT_FIXNUM:
       idx = mrb_fixnum(indx);
@@ -1127,12 +1104,8 @@ mrb_str_aref_m(mrb_state *mrb, mrb_value str)
   if (argc == 2) {
     mrb_int n1, n2;
 
-    mrb_regexp_check(mrb, a1);
     mrb_get_args(mrb, "ii", &n1, &n2);
     return str_substr(mrb, str, n1, n2);
-  }
-  if (argc != 1) {
-    mrb_raisef(mrb, E_ARGUMENT_ERROR, "wrong number of arguments (%S for 1)", mrb_fixnum_value(argc));
   }
   return mrb_str_aref(mrb, str, a1);
 }
@@ -1557,7 +1530,6 @@ mrb_str_index_m(mrb_state *mrb, mrb_value str)
     else
       sub = mrb_nil_value();
   }
-  mrb_regexp_check(mrb, sub);
   clen = RSTRING_CHAR_LEN(str);
   if (pos < 0) {
     pos += clen;
@@ -1809,7 +1781,6 @@ mrb_str_rindex(mrb_state *mrb, mrb_value str)
     if (pos < 0) {
       pos += len;
       if (pos < 0) {
-        mrb_regexp_check(mrb, sub);
         return mrb_nil_value();
       }
     }
@@ -1823,7 +1794,6 @@ mrb_str_rindex(mrb_state *mrb, mrb_value str)
       sub = mrb_nil_value();
   }
   pos = chars2bytes(str, 0, pos);
-  mrb_regexp_check(mrb, sub);
 
   switch (mrb_type(sub)) {
     default: {
@@ -1917,16 +1887,11 @@ mrb_str_split_m(mrb_state *mrb, mrb_value str)
   if (argc == 0 || mrb_nil_p(spat)) {
     split_type = awk;
   }
-  else {
-    if (mrb_string_p(spat)) {
-      split_type = string;
-      if (RSTRING_LEN(spat) == 1 && RSTRING_PTR(spat)[0] == ' ') {
-          split_type = awk;
-      }
-    }
-    else {
-      mrb_noregexp(mrb, str);
-    }
+  else if (!mrb_string_p(spat)) {
+    mrb_raise(mrb, E_TYPE_ERROR, "expected String");
+  }
+  else if (RSTRING_LEN(spat) == 1 && RSTRING_PTR(spat)[0] == ' ') {
+    split_type = awk;
   }
 
   result = mrb_ary_new(mrb);
@@ -1963,7 +1928,7 @@ mrb_str_split_m(mrb_state *mrb, mrb_value str)
       }
     }
   }
-  else if (split_type == string) {
+  else {                        /* split_type == string */
     mrb_int str_len = RSTRING_LEN(str);
     mrb_int pat_len = RSTRING_LEN(spat);
     mrb_int idx = 0;
@@ -1984,9 +1949,6 @@ mrb_str_split_m(mrb_state *mrb, mrb_value str)
     }
     beg = idx;
   }
-  else {
-    mrb_noregexp(mrb, str);
-  }
   if (RSTRING_LEN(str) > 0 && (lim_p || RSTRING_LEN(str) > beg || lim < 0)) {
     if (RSTRING_LEN(str) == beg) {
       tmp = mrb_str_new_empty(mrb, str);
@@ -2006,7 +1968,7 @@ mrb_str_split_m(mrb_state *mrb, mrb_value str)
   return result;
 }
 
-MRB_API mrb_value
+static mrb_value
 mrb_str_len_to_inum(mrb_state *mrb, const char *str, mrb_int len, mrb_int base, int badcheck)
 {
   const char *p = str;
@@ -2150,7 +2112,7 @@ mrb_str_len_to_inum(mrb_state *mrb, const char *str, mrb_int len, mrb_int base, 
       else
 #endif
       {
-        mrb_raisef(mrb, E_ARGUMENT_ERROR, "string (%S) too big for integer",
+        mrb_raisef(mrb, E_RANGE_ERROR, "string (%S) too big for integer",
                    mrb_str_new(mrb, str, pend-str));
       }
     }
@@ -2174,7 +2136,7 @@ mrb_str_len_to_inum(mrb_state *mrb, const char *str, mrb_int len, mrb_int base, 
 }
 
 MRB_API mrb_value
-mrb_cstr_to_inum(mrb_state *mrb, const char *str, int base, int badcheck)
+mrb_cstr_to_inum(mrb_state *mrb, const char *str, mrb_int base, mrb_bool badcheck)
 {
   return mrb_str_len_to_inum(mrb, str, strlen(str), base, badcheck);
 }
@@ -2844,7 +2806,7 @@ mrb_float_read(const char *string, char **endPtr)
      */
 
     p = string;
-    while (isspace(*p)) {
+    while (ISSPACE(*p)) {
       p += 1;
     }
     if (*p == '-') {
@@ -2867,7 +2829,7 @@ mrb_float_read(const char *string, char **endPtr)
     for (mantSize = 0; ; mantSize += 1)
     {
       c = *p;
-      if (!isdigit(c)) {
+      if (!ISDIGIT(c)) {
         if ((c != '.') || (decPt >= 0)) {
           break;
         }
@@ -2952,7 +2914,7 @@ mrb_float_read(const char *string, char **endPtr)
         }
         expSign = FALSE;
       }
-      while (isdigit(*p)) {
+      while (ISDIGIT(*p)) {
         exp = exp * 10 + (*p - '0');
         if (exp > 19999) {
           exp = 19999;

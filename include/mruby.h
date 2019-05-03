@@ -1,7 +1,7 @@
 /*
 ** mruby - An embeddable Ruby implementation
 **
-** Copyright (c) mruby developers 2010-2018
+** Copyright (c) mruby developers 2010-2019
 **
 ** Permission is hereby granted, free of charge, to any person obtaining
 ** a copy of this software and associated documentation files (the
@@ -34,6 +34,7 @@
 #define __STDC_FORMAT_MACROS
 #endif
 
+#include <stdarg.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <limits.h>
@@ -83,7 +84,7 @@
 #endif
 #endif
 
-#include "mruby/common.h"
+#include <mruby/common.h>
 #include <mruby/value.h>
 #include <mruby/gc.h>
 #include <mruby/version.h>
@@ -195,13 +196,9 @@ struct mrb_jmpbuf;
 
 typedef void (*mrb_atexit_func)(struct mrb_state*);
 
-#define MRB_STATE_NO_REGEXP 1
-#define MRB_STATE_REGEXP    2
-
 typedef struct mrb_state {
   struct mrb_jmpbuf *jmp;
 
-  uint32_t flags;
   mrb_allocf allocf;                      /* memory allocation function */
   void *allocf_ud;                        /* auxiliary data of allocf */
 
@@ -569,8 +566,6 @@ MRB_INLINE mrb_value mrb_class_new_instance(mrb_state *mrb, mrb_int argc, const 
   return mrb_obj_new(mrb,c,argc,argv);
 }
 
-MRB_API mrb_value mrb_instance_new(mrb_state *mrb, mrb_value cv);
-
 /**
  * Creates a new instance of Class, Class.
  *
@@ -708,6 +703,9 @@ MRB_API struct RClass * mrb_module_get(mrb_state *mrb, const char *name);
  * @return [struct RClass *] A reference to the module.
 */
 MRB_API struct RClass * mrb_module_get_under(mrb_state *mrb, struct RClass *outer, const char *name);
+/* a function to raise NotImplementedError with current method name */
+MRB_API void mrb_notimplement(mrb_state*);
+/* a function to be replacement of unimplemented method */
 MRB_API mrb_value mrb_notimplement_m(mrb_state*, mrb_value);
 
 /**
@@ -866,7 +864,7 @@ typedef const char *mrb_args_format;
  */
 MRB_API mrb_int mrb_get_args(mrb_state *mrb, mrb_args_format format, ...);
 
-static inline mrb_sym
+MRB_INLINE mrb_sym
 mrb_get_mid(mrb_state *mrb) /* get method symbol */
 {
   return mrb->c->ci->mid;
@@ -1079,16 +1077,13 @@ MRB_API mrb_value mrb_Float(mrb_state *mrb, mrb_value val);
 MRB_API mrb_value mrb_inspect(mrb_state *mrb, mrb_value obj);
 MRB_API mrb_bool mrb_eql(mrb_state *mrb, mrb_value obj1, mrb_value obj2);
 
-static inline int mrb_gc_arena_save(mrb_state*);
-static inline void mrb_gc_arena_restore(mrb_state*,int);
-
-static inline int
+MRB_INLINE int
 mrb_gc_arena_save(mrb_state *mrb)
 {
   return mrb->gc.arena_idx;
 }
 
-static inline void
+MRB_INLINE void
 mrb_gc_arena_restore(mrb_state *mrb, int idx)
 {
   mrb->gc.arena_idx = idx;
@@ -1139,10 +1134,13 @@ MRB_API mrb_noreturn void mrb_exc_raise(mrb_state *mrb, mrb_value exc);
 MRB_API mrb_noreturn void mrb_raise(mrb_state *mrb, struct RClass *c, const char *msg);
 MRB_API mrb_noreturn void mrb_raisef(mrb_state *mrb, struct RClass *c, const char *fmt, ...);
 MRB_API mrb_noreturn void mrb_name_error(mrb_state *mrb, mrb_sym id, const char *fmt, ...);
+MRB_API mrb_noreturn void mrb_frozen_error(mrb_state *mrb, void *frozen_obj);
 MRB_API void mrb_warn(mrb_state *mrb, const char *fmt, ...);
 MRB_API mrb_noreturn void mrb_bug(mrb_state *mrb, const char *fmt, ...);
 MRB_API void mrb_print_backtrace(mrb_state *mrb);
 MRB_API void mrb_print_error(mrb_state *mrb);
+/* function for `raisef` formatting */
+MRB_API mrb_value mrb_vformat(mrb_state *mrb, const char *format, va_list ap);
 
 /* macros to get typical exception objects
    note:
@@ -1189,6 +1187,11 @@ MRB_API mrb_value mrb_to_int(mrb_state *mrb, mrb_value val);
 #define mrb_int(mrb, val) mrb_fixnum(mrb_to_int(mrb, val))
 MRB_API mrb_value mrb_to_str(mrb_state *mrb, mrb_value val);
 MRB_API void mrb_check_type(mrb_state *mrb, mrb_value x, enum mrb_vtype t);
+
+MRB_INLINE void mrb_check_frozen(mrb_state *mrb, void *o)
+{
+  if (MRB_FROZEN_P((struct RBasic*)o)) mrb_frozen_error(mrb, o);
+}
 
 typedef enum call_type {
   CALL_PUBLIC,

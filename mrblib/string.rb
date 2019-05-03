@@ -3,7 +3,9 @@
 #
 # ISO 15.2.10
 class String
+  # ISO 15.2.10.3
   include Comparable
+
   ##
   # Calls the given block for each line
   # and pass the respective line.
@@ -103,18 +105,15 @@ class String
     self.replace(str)
   end
 
-  ##
-  # Calls the given block for each match of +pattern+
-  # If no block is given return an array with all
-  # matches of +pattern+.
-  #
-  # ISO 15.2.10.5.32
-  def scan(reg, &block)
-    ### *** TODO *** ###
-    unless Object.const_defined?(:Regexp)
-      raise NotImplementedError, "scan not available (yet)"
-    end
-  end
+#  ##
+#  # Calls the given block for each match of +pattern+
+#  # If no block is given return an array with all
+#  # matches of +pattern+.
+#  #
+#  # ISO 15.2.10.5.32
+#  def scan(pattern, &block)
+#    # TODO: String#scan is not implemented yet
+#  end
 
   ##
   # Replace only the first match of +pattern+ with
@@ -166,18 +165,6 @@ class String
   end
 
   ##
-  # Call the given block for each character of
-  # +self+.
-  def each_char(&block)
-    pos = 0
-    while pos < self.size
-      block.call(self[pos])
-      pos += 1
-    end
-    self
-  end
-
-  ##
   # Call the given block for each byte of +self+.
   def each_byte(&block)
     bytes = self.bytes
@@ -195,12 +182,12 @@ class String
   def []=(*args)
     anum = args.size
     if anum == 2
-      pos, value = args
+      pos, value = args[0], args[1].__to_str
       case pos
       when String
         posnum = self.index(pos)
         if posnum
-          b = self[0, posnum.to_i]
+          b = self[0, posnum]
           a = self[(posnum + pos.length)..-1]
           self.replace([b, value, a].join(''))
         else
@@ -215,17 +202,18 @@ class String
         end
         return self[head, tail-head]=value
       else
+        pos = pos.__to_int
         pos += self.length if pos < 0
         if pos < 0 || pos > self.length
           raise IndexError, "index #{args[0]} out of string"
         end
-        b = self[0, pos.to_i]
+        b = self[0, pos]
         a = self[pos + 1..-1]
         self.replace([b, value, a].join(''))
       end
       return value
     elsif anum == 3
-      pos, len, value = args
+      pos, len, value = args[0].__to_int, args[1].__to_int, args[2].__to_str
       pos += self.length if pos < 0
       if pos < 0 || pos > self.length
         raise IndexError, "index #{args[0]} out of string"
@@ -233,7 +221,7 @@ class String
       if len < 0
         raise IndexError, "negative length #{len}"
       end
-      b = self[0, pos.to_i]
+      b = self[0, pos]
       a = self[pos + len..-1]
       self.replace([b, value, a].join(''))
       return value
@@ -242,33 +230,26 @@ class String
     end
   end
 
+  def _regexp(re, mid)
+    if String === re
+      if Object.const_defined?(:Regexp)
+        return Regexp.new(re)
+      else
+        raise NotImplementedError, "String##{mid} needs Regexp class"
+      end
+    end
+    re
+  end
+
   ##
   # ISO 15.2.10.5.3
   def =~(re)
-    re =~ self
+    _regexp(re, :=~) =~ self
   end
 
   ##
   # ISO 15.2.10.5.27
   def match(re, &block)
-    if String === re
-      if Object.const_defined?(:Regexp)
-        r = Regexp.new(re)
-        r.match(self, &block)
-      else
-        raise NotImplementedError, "String#match needs Regexp class"
-      end
-    else
-      re.match(self, &block)
-    end
+    _regexp(re, :match).match(self, &block)
   end
-end
-
-##
-# String is comparable
-#
-# ISO 15.2.10.3
-module Comparable; end
-class String
-  include Comparable
 end
