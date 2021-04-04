@@ -3,6 +3,7 @@
 #include <mruby/array.h>
 #include <mruby/range.h>
 #include <mruby/hash.h>
+#include <mruby/presym.h>
 
 /*
  *  call-seq:
@@ -28,9 +29,8 @@ static mrb_value
 mrb_ary_assoc(mrb_state *mrb, mrb_value ary)
 {
   mrb_int i;
-  mrb_value v, k;
-
-  mrb_get_args(mrb, "o", &k);
+  mrb_value v;
+  mrb_value k = mrb_get_arg1(mrb);
 
   for (i = 0; i < RARRAY_LEN(ary); ++i) {
     v = mrb_check_array_type(mrb, RARRAY_PTR(ary)[i]);
@@ -59,13 +59,12 @@ static mrb_value
 mrb_ary_rassoc(mrb_state *mrb, mrb_value ary)
 {
   mrb_int i;
-  mrb_value v, value;
-
-  mrb_get_args(mrb, "o", &value);
+  mrb_value v;
+  mrb_value value = mrb_get_arg1(mrb);
 
   for (i = 0; i < RARRAY_LEN(ary); ++i) {
     v = RARRAY_PTR(ary)[i];
-    if (mrb_type(v) == MRB_TT_ARRAY &&
+    if (mrb_array_p(v) &&
         RARRAY_LEN(v) > 1 &&
         mrb_equal(mrb, RARRAY_PTR(v)[1], value))
       return v;
@@ -99,7 +98,7 @@ static mrb_value
 mrb_ary_values_at(mrb_state *mrb, mrb_value self)
 {
   mrb_int argc;
-  mrb_value *argv;
+  const mrb_value *argv;
 
   mrb_get_args(mrb, "*", &argv, &argc);
 
@@ -140,22 +139,21 @@ mrb_ary_slice_bang(mrb_state *mrb, mrb_value self)
   mrb_ary_modify(mrb, a);
 
   if (mrb_get_argc(mrb) == 1) {
-    mrb_value index;
+    mrb_value index = mrb_get_arg1(mrb);
 
-    mrb_get_args(mrb, "o|i", &index, &len);
     switch (mrb_type(index)) {
     case MRB_TT_RANGE:
-      if (mrb_range_beg_len(mrb, index, &i, &len, ARY_LEN(a), TRUE) == 1) {
+      if (mrb_range_beg_len(mrb, index, &i, &len, ARY_LEN(a), TRUE) == MRB_RANGE_OK) {
         goto delete_pos_len;
       }
       else {
         return mrb_nil_value();
       }
-    case MRB_TT_FIXNUM:
-      val = mrb_funcall(mrb, self, "delete_at", 1, index);
+    case MRB_TT_INTEGER:
+      val = mrb_funcall_id(mrb, self, MRB_SYM(delete_at), 1, index);
       return val;
     default:
-      val = mrb_funcall(mrb, self, "delete_at", 1, index);
+      val = mrb_funcall_id(mrb, self, MRB_SYM(delete_at), 1, index);
       return val;
     }
   }
@@ -194,7 +192,7 @@ mrb_mruby_array_ext_gem_init(mrb_state* mrb)
   mrb_define_method(mrb, a, "at",     mrb_ary_at,     MRB_ARGS_REQ(1));
   mrb_define_method(mrb, a, "rassoc", mrb_ary_rassoc, MRB_ARGS_REQ(1));
   mrb_define_method(mrb, a, "values_at", mrb_ary_values_at, MRB_ARGS_ANY());
-  mrb_define_method(mrb, a, "slice!", mrb_ary_slice_bang,   MRB_ARGS_ANY());
+  mrb_define_method(mrb, a, "slice!", mrb_ary_slice_bang,   MRB_ARGS_ARG(1,1));
 }
 
 void

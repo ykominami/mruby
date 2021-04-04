@@ -1,7 +1,11 @@
-#include <stdio.h>
+#include <mruby.h>
+
+#ifdef MRB_NO_STDIO
+# error mruby-bin-mrbc conflicts 'MRB_NO_STDIO' in your build configuration
+#endif
+
 #include <stdlib.h>
 #include <string.h>
-#include <mruby.h>
 #include <mruby/compile.h>
 #include <mruby/dump.h>
 #include <mruby/proc.h>
@@ -10,16 +14,17 @@
 #define C_EXT       ".c"
 
 struct mrbc_args {
-  int argc;
-  char **argv;
-  int idx;
   const char *prog;
   const char *outfile;
   const char *initname;
+  char **argv;
+  int argc;
+  int idx;
+  mrb_bool dump_struct  : 1;
   mrb_bool check_syntax : 1;
   mrb_bool verbose      : 1;
   mrb_bool remove_lv    : 1;
-  unsigned int flags    : 4;
+  uint8_t flags         : 4;
 };
 
 static void
@@ -28,12 +33,12 @@ usage(const char *name)
   static const char *const usage_msg[] = {
   "switches:",
   "-c           check syntax only",
-  "-o<outfile>  place the output into <outfile>",
+  "-o<outfile>  place the output into <outfile>; required for multi-files",
   "-v           print version number, then turn on verbose mode",
   "-g           produce debugging information",
   "-B<symbol>   binary <symbol> output in C language format",
-  "-e           generate little endian iseq data",
-  "-E           generate big endian iseq data",
+  "-S           dump C struct (requires -B)",
+  "-s           define <symbol> as static variable",
   "--remove-lv  remove local variables",
   "--verbose    run at verbose mode",
   "--version    print the version",
@@ -42,7 +47,7 @@ usage(const char *name)
   };
   const char *const *p = usage_msg;
 
-  printf("Usage: %s [switches] programfile\n", name);
+  printf("Usage: %s [switches] programfile...\n", name);
   while (*p)
     printf("  %s\n", *p++);
 }
@@ -50,19 +55,26 @@ usage(const char *name)
 static char *
 get_outfilename(mrb_state *mrb, char *infile, const char *ext)
 {
-  size_t infilelen;
-  size_t extlen;
+  size_t ilen, flen, elen;
   char *outfile;
-  char *p;
+  char *p = NULL;
 
-  infilelen = strlen(infile);
-  extlen = strlen(ext);
-  outfile = (char*)mrb_malloc(mrb, infilelen + extlen + 1);
-  memcpy(outfile, infile, infilelen + 1);
+  ilen = strlen(infile);
+  flen = ilen;
   if (*ext) {
-    if ((p = strrchr(outfile, '.')) == NULL)
-      p = outfile + infilelen;
-    memcpy(p, ext, extlen + 1);
+    elen = strlen(ext);
+    if ((p = strrchr(infile, '.'))) {
+      ilen = p - infile;
+    }
+    flen += elen;
+  }
+  else {
+    flen = ilen;
+  }
+  outfile = (char*)mrb_malloc(mrb, flen+1);
+  strncpy(outfile, infile, ilen+1);
+  if (p) {
+    strncpy(outfile+ilen, ext, elen+1);
   }
 
   return outfile;
@@ -71,7 +83,6 @@ get_outfilename(mrb_state *mrb, char *infile, const char *ext)
 static int
 parse_args(mrb_state *mrb, int argc, char **argv, struct mrbc_args *args)
 {
-  char *outfile = NULL;
   static const struct mrbc_args args_zero = { 0 };
   int i;
 
@@ -86,7 +97,7 @@ parse_args(mrb_state *mrb, int argc, char **argv, struct mrbc_args *args)
       case 'o':
         if (args->outfile) {
           fprintf(stderr, "%s: an output file is already specified. (%s)\n",
-                  args->prog, outfile);
+                  args->prog, args->outfile);
           return -1;
         }
         if (argv[i][2] == '\0' && argv[i+1]) {
@@ -96,6 +107,9 @@ parse_args(mrb_state *mrb, int argc, char **argv, struct mrbc_args *args)
         else {
           args->outfile = get_outfilename(mrb, argv[i] + 2, "");
         }
+        break;
+      case 'S':
+        args->dump_struct = TRUE;
         break;
       case 'B':
         if (argv[i][2] == '\0' && argv[i+1]) {
@@ -118,13 +132,14 @@ parse_args(mrb_state *mrb, int argc, char **argv, struct mrbc_args *args)
         args->verbose = TRUE;
         break;
       case 'g':
-        args->flags |= DUMP_DEBUG_INFO;
+        args->flags |= MRB_DUMP_DEBUG_INFO;
+        break;
+      case 's':
+        args->flags |= MRB_DUMP_STATIC;
         break;
       case 'E':
-        args->flags = DUMP_ENDIAN_BIG | (args->flags & ~DUMP_ENDIAN_MASK);
-        break;
       case 'e':
-        args->flags = DUMP_ENDIAN_LIL | (args->flags & ~DUMP_ENDIAN_MASK);
+        fprintf(stderr, "%s: -e/-E option no longer needed.\n", args->prog);
         break;
       case 'h':
         return -1;
@@ -157,10 +172,6 @@ parse_args(mrb_state *mrb, int argc, char **argv, struct mrbc_args *args)
       break;
     }
   }
-  if (args->verbose && args->initname && (args->flags & DUMP_ENDIAN_MASK) == 0) {
-    fprintf(stderr, "%s: generating %s endian C file. specify -e/-E for cross compiling.\n",
-            args->prog, bigendian_p() ? "big" : "little");
-  }
   return i;
 }
 
@@ -184,7 +195,7 @@ partial_hook(struct mrb_parser_state *p)
     return -1;
   }
   fn = args->argv[args->idx++];
-  p->f = fopen(fn, "r");
+  p->f = fopen(fn, "rb");
   if (p->f == NULL) {
     fprintf(stderr, "%s: cannot open program file. (%s)\n", args->prog, fn);
     return -1;
@@ -211,7 +222,7 @@ load_file(mrb_state *mrb, struct mrbc_args *args)
   }
   else {
     need_close = TRUE;
-    if ((infile = fopen(input, "r")) == NULL) {
+    if ((infile = fopen(input, "rb")) == NULL) {
       fprintf(stderr, "%s: cannot open program file. (%s)\n", args->prog, input);
       return mrb_nil_value();
     }
@@ -236,13 +247,18 @@ static int
 dump_file(mrb_state *mrb, FILE *wfp, const char *outfile, struct RProc *proc, struct mrbc_args *args)
 {
   int n = MRB_DUMP_OK;
-  mrb_irep *irep = proc->body.irep;
+  const mrb_irep *irep = proc->body.irep;
 
   if (args->remove_lv) {
-    mrb_irep_remove_lv(mrb, irep);
+    mrb_irep_remove_lv(mrb, (mrb_irep*)irep);
   }
   if (args->initname) {
-    n = mrb_dump_irep_cfunc(mrb, irep, args->flags, wfp, args->initname);
+    if (args->dump_struct) {
+      n = mrb_dump_irep_cstruct(mrb, irep, args->flags, wfp, args->initname);
+    }
+    else {
+      n = mrb_dump_irep_cfunc(mrb, irep, args->flags, wfp, args->initname);
+    }
     if (n == MRB_DUMP_INVALID_ARGUMENT) {
       fprintf(stderr, "%s: invalid C language symbol name\n", args->initname);
     }
@@ -259,7 +275,7 @@ dump_file(mrb_state *mrb, FILE *wfp, const char *outfile, struct RProc *proc, st
 int
 main(int argc, char **argv)
 {
-  mrb_state *mrb = mrb_open();
+  mrb_state *mrb = mrb_open_core(NULL, NULL);
   int n, result;
   struct mrbc_args args;
   FILE *wfp;
@@ -332,7 +348,7 @@ mrb_init_mrblib(mrb_state *mrb)
 {
 }
 
-#ifndef DISABLE_GEMS
+#ifndef MRB_NO_GEMS
 void
 mrb_init_mrbgems(mrb_state *mrb)
 {

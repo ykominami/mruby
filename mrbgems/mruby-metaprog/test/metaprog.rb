@@ -1,17 +1,3 @@
-assert('Kernel#__send__', '15.3.1.3.4') do
-  # test with block
-  l = __send__(:lambda) do
-    true
-  end
-
-  assert_true l.call
-  assert_equal Proc, l.class
-  # test with argument
-  assert_true __send__(:respond_to?, :nil?)
-  # test without argument and without block
-  assert_equal String, __send__(:to_s).class
-end
-
 assert('Kernel#send', '15.3.1.3.44') do
   # test with block
   l = send(:lambda) do
@@ -58,6 +44,8 @@ assert('Kernel#instance_variable_set', '15.3.1.3.22') do
   %w[@6 @% @@a @ a].each do |n|
     assert_raise(NameError) { o.instance_variable_set(n, 1) }
   end
+  assert_raise(FrozenError) { o.freeze.instance_variable_set(:@a, 2) }
+  assert_raise(FrozenError, ArgumentError) { nil.instance_variable_set(:@a, 2) }
 end
 
 assert('Kernel#instance_variables', '15.3.1.3.23') do
@@ -76,6 +64,8 @@ end
 
 assert('Kernel#methods', '15.3.1.3.31') do
   assert_equal Array, methods.class
+  assert_equal [:foo], Class.new{def self.foo; end}.methods(false)
+  assert_equal [], Class.new{}.methods(false)
 end
 
 assert('Kernel#private_methods', '15.3.1.3.36') do
@@ -99,6 +89,21 @@ assert('Kernel#singleton_methods', '15.3.1.3.45') do
   assert_equal singleton_methods.class, Array
 end
 
+assert('Kernel.global_variables', '15.3.1.2.4') do
+  assert_equal Array, Kernel.global_variables.class
+end
+
+assert('Kernel#global_variables', '15.3.1.3.14') do
+  variables1 = global_variables
+  assert_equal Array, variables1.class
+  assert_not_include(variables1, :$kernel_global_variables_test)
+
+  $kernel_global_variables_test = nil
+  variables2 = global_variables
+  assert_include(variables2, :$kernel_global_variables_test)
+  assert_equal(1, variables2.size - variables1.size)
+end
+
 assert('Kernel.local_variables', '15.3.1.2.7') do
   a, b = 0, 1
   a += b
@@ -111,6 +116,15 @@ assert('Kernel.local_variables', '15.3.1.2.7') do
     # Kernel#local_variables: 15.3.1.3.28
     local_variables.sort
   }.call(-1, -2)
+
+  a = Object.new
+  def a.hoge(vars, *, **)
+    Proc.new {
+      x, y = 1, 2
+      local_variables.sort
+    }
+  end
+  assert_equal([:vars, :x, :y]) { a.hoge(0).call }
 end
 
 assert('Kernel#define_singleton_method') do
@@ -120,6 +134,8 @@ assert('Kernel#define_singleton_method') do
   end
   assert_equal :test_method, ret
   assert_equal :singleton_method_ok, o.test_method
+  assert_raise(TypeError) { 2.define_singleton_method(:f){} }
+  assert_raise(FrozenError) { [].freeze.define_singleton_method(:f){} }
 end
 
 assert('Kernel#singleton_class') do
@@ -283,6 +299,9 @@ assert('Module#remove_class_variable', '15.2.2.4.39') do
   assert_raise(NameError) do
     Test4RemoveClassVariable.remove_class_variable(:@v)
   end
+  assert_raise(FrozenError) do
+    Test4RemoveClassVariable.freeze.remove_class_variable(:@@cv)
+  end
 end
 
 assert('Module#remove_method', '15.2.2.4.41') do
@@ -290,9 +309,9 @@ assert('Module#remove_method', '15.2.2.4.41') do
     class Parent
       def hello
       end
-     end
+    end
 
-     class Child < Parent
+    class Child < Parent
       def hello
       end
     end
@@ -302,6 +321,7 @@ assert('Module#remove_method', '15.2.2.4.41') do
   assert_same klass, klass.class_eval{ remove_method :hello }
   assert_true klass.instance_methods.include? :hello
   assert_false klass.instance_methods(false).include? :hello
+  assert_raise(FrozenError) { klass.freeze.remove_method :m }
 end
 
 assert('Module.nesting', '15.2.2.2.2') do
@@ -377,15 +397,15 @@ end
 
 assert('alias_method and remove_method') do
   begin
-    Fixnum.alias_method :to_s_, :to_s
-    Fixnum.remove_method :to_s
+    Integer.alias_method :to_s_, :to_s
+    Integer.remove_method :to_s
 
     assert_nothing_raised do
       # segfaults if mrb_cptr is used
       1.to_s
     end
   ensure
-    Fixnum.alias_method :to_s, :to_s_
-    Fixnum.remove_method :to_s_
+    Integer.alias_method :to_s, :to_s_
+    Integer.remove_method :to_s_
   end
 end

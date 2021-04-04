@@ -1,5 +1,5 @@
 # AO render benchmark
-# Original program (C) Syoyo Fujita in Javascript (and other languages)
+# Original program (C) Syoyo Fujita in JavaScript (and other languages)
 #      https://code.google.com/p/aobench/
 # Ruby(yarv2llvm) version by Hideki Miura
 # mruby version by Hideki Miura
@@ -260,7 +260,7 @@ class Scene
       w.times do |x|
         rad = Vec.new(0.0, 0.0, 0.0)
 
-        # Subsmpling
+        # Subsampling
         nsubsamples.times do |v|
           nsubsamples.times do |u|
             cnt = cnt + 1

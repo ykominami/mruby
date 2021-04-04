@@ -4,25 +4,30 @@
 MRubyIOTestUtil.io_test_setup
 $cr, $crlf, $cmd = MRubyIOTestUtil.win? ? [1, "\r\n", "cmd /c "] : [0, "\n", ""]
 
-assert_io_open = ->(meth) do
-  fd = IO.sysopen($mrbtest_io_rfname)
-  assert_equal Fixnum, fd.class
-  io1 = IO.__send__(meth, fd)
-  begin
-    assert_equal IO, io1.class
-    assert_equal $mrbtest_io_msg, io1.read
-  ensure
-    io1.close
-  end
-
-  io2 = IO.__send__(meth, IO.sysopen($mrbtest_io_rfname))do |io|
-    if meth == :open
-      assert_equal $mrbtest_io_msg, io.read
-    else
-      flunk "IO.#{meth} does not take block"
+def assert_io_open(meth)
+  assert "assert_io_open" do
+    fd = IO.sysopen($mrbtest_io_rfname)
+    assert_equal Integer, fd.class
+    io1 = IO.__send__(meth, fd)
+    begin
+      assert_equal IO, io1.class
+      assert_equal $mrbtest_io_msg, io1.read
+    ensure
+      io1.close
     end
+
+    io2 = IO.__send__(meth, IO.sysopen($mrbtest_io_rfname))do |io|
+      if meth == :open
+        assert_equal $mrbtest_io_msg, io.read
+      else
+        flunk "IO.#{meth} does not take block"
+      end
+    end
+    io2.close unless meth == :open
+
+    assert_raise(RuntimeError) { IO.__send__(meth, 1023) } # For Windows
+    assert_raise(RuntimeError) { IO.__send__(meth, 1 << 26) }
   end
-  io2.close unless meth == :open
 end
 
 assert('IO.class', '15.2.20') do
@@ -38,7 +43,7 @@ assert('IO.ancestors', '15.2.20.3') do
 end
 
 assert('IO.open', '15.2.20.4.1') do
-  assert_io_open.(:open)
+  assert_io_open(:open)
 end
 
 assert('IO#close', '15.2.20.5.1') do
@@ -127,10 +132,11 @@ end
 
 assert "IO#read(n) with n > IO::BUF_SIZE" do
   skip "pipe is not supported on this platform" if MRubyIOTestUtil.win?
-  r,w = IO.pipe
-  n = IO::BUF_SIZE+1
-  w.write 'a'*n
-  assert_equal r.read(n), 'a'*n
+  IO.pipe do |r,w|
+    n = IO::BUF_SIZE+1
+    w.write 'a'*n
+    assert_equal 'a'*n, r.read(n)
+  end
 end
 
 assert('IO#readchar', '15.2.20.5.15') do
@@ -224,11 +230,11 @@ assert('IO#dup for writable') do
 end
 
 assert('IO.for_fd') do
-  assert_io_open.(:for_fd)
+  assert_io_open(:for_fd)
 end
 
 assert('IO.new') do
-  assert_io_open.(:new)
+  assert_io_open(:new)
 end
 
 assert('IO gc check') do
@@ -426,7 +432,7 @@ assert('IO.popen') do
     $? = nil
     io = IO.popen("#{$cmd}echo mruby-io")
     assert_true io.close_on_exec?
-    assert_equal Fixnum, io.pid.class
+    assert_equal Integer, io.pid.class
 
     out = io.read
     assert_equal out.class, String
@@ -558,6 +564,34 @@ assert('IO#sysseek') do
     assert_equal 2, io.sysseek(2)
     assert_equal 5, io.sysseek(3, IO::SEEK_CUR) # 2 + 3 => 5
     assert_equal $mrbtest_io_msg.size - 4, io.sysseek(-4, IO::SEEK_END)
+  end
+end
+
+assert('IO#pread') do
+  skip "IO#pread is not implemented on this configuration" unless MRubyIOTestUtil::MRB_WITH_IO_PREAD_PWRITE
+
+  IO.open(IO.sysopen($mrbtest_io_rfname, 'r'), 'r') do |io|
+    assert_equal $mrbtest_io_msg.byteslice(5, 8), io.pread(8, 5)
+    assert_equal 0, io.pos
+    assert_equal $mrbtest_io_msg.byteslice(1, 5), io.pread(5, 1)
+    assert_equal 0, io.pos
+    assert_raise(RuntimeError) { io.pread(20, -9) }
+  end
+end
+
+assert('IO#pwrite') do
+  skip "IO#pwrite is not implemented on this configuration" unless MRubyIOTestUtil::MRB_WITH_IO_PREAD_PWRITE
+
+  IO.open(IO.sysopen($mrbtest_io_wfname, 'w+'), 'w+') do |io|
+    assert_equal 6, io.pwrite("Warld!", 7)
+    assert_equal 0, io.pos
+    assert_equal 7, io.pwrite("Hello, ", 0)
+    assert_equal 0, io.pos
+    assert_equal "Hello, Warld!", io.read
+    assert_equal 6, io.pwrite("world!", 7)
+    assert_equal 13, io.pos
+    io.pos = 0
+    assert_equal "Hello, world!", io.read
   end
 end
 

@@ -77,7 +77,7 @@ end
 
 assert 'instance' do
   assert_kind_of Method, 1.method(:+)
-  assert_kind_of UnboundMethod, Fixnum.instance_method(:+)
+  assert_kind_of UnboundMethod, Integer.instance_method(:+)
 end
 
 assert 'Method#call' do
@@ -404,9 +404,9 @@ assert 'UnboundMethod#arity' do
 end
 
 assert 'UnboundMethod#==' do
-  assert_false(Fixnum.instance_method(:+) == Fixnum.instance_method(:-))
-  assert_true(Fixnum.instance_method(:+) == Fixnum.instance_method(:+))
-  assert_false(Fixnum.instance_method(:+) == Float.instance_method(:+))
+  assert_false(Integer.instance_method(:+) == Integer.instance_method(:-))
+  assert_true(Integer.instance_method(:+) == Integer.instance_method(:+))
+  assert_false(Integer.instance_method(:+) == Float.instance_method(:+))
   assert_true(UnboundMethod.instance_method(:==) == UnboundMethod.instance_method(:eql?))
 end
 
@@ -440,4 +440,12 @@ assert 'UnboundMethod#bind' do
   assert_raise(TypeError) { sc.instance_method(:foo).bind([]) }
   assert_raise(TypeError) { Array.instance_method(:each).bind(1) }
   assert_kind_of Method, Object.instance_method(:object_id).bind(Object.new)
+end
+
+assert 'UnboundMethod#bind_call' do
+  m = Array.instance_method(:size)
+  assert_equal(:size, m.name)
+  assert_equal(0, m.bind_call([]))
+  assert_equal(1, m.bind_call([1]))
+  assert_equal(2, m.bind_call([1,2]))
 end

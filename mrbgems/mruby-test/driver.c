@@ -21,6 +21,7 @@
 extern const uint8_t mrbtest_assert_irep[];
 
 void mrbgemtest_init(mrb_state* mrb);
+void mrb_init_test_vformat(mrb_state* mrb);
 
 /* Print a short remark for the user */
 static void
@@ -49,7 +50,7 @@ eval_test(mrb_state *mrb)
 static mrb_value
 t_print(mrb_state *mrb, mrb_value self)
 {
-  mrb_value *argv;
+  const mrb_value *argv;
   mrb_int argc;
   mrb_int i;
 
@@ -223,13 +224,15 @@ mrb_init_test_driver(mrb_state *mrb, mrb_bool verbose)
   mrb_define_const(mrb, mrbtest, "FIXNUM_MIN", mrb_fixnum_value(MRB_INT_MIN));
   mrb_define_const(mrb, mrbtest, "FIXNUM_BIT", mrb_fixnum_value(MRB_INT_BIT));
 
-#ifndef MRB_WITHOUT_FLOAT
-#ifdef MRB_USE_FLOAT
-  mrb_define_const(mrb, mrbtest, "FLOAT_TOLERANCE", mrb_float_value(mrb, 1e-6));
+#ifndef MRB_NO_FLOAT
+#ifdef MRB_USE_FLOAT32
+  mrb_define_const(mrb, mrbtest, "FLOAT_TOLERANCE", mrb_float_value(mrb, 1e-5));
 #else
-  mrb_define_const(mrb, mrbtest, "FLOAT_TOLERANCE", mrb_float_value(mrb, 1e-12));
+  mrb_define_const(mrb, mrbtest, "FLOAT_TOLERANCE", mrb_float_value(mrb, 1e-10));
 #endif
 #endif
+
+  mrb_init_test_vformat(mrb);
 
   if (verbose) {
     mrb_gv_set(mrb, mrb_intern_lit(mrb, "$mrbtest_verbose"), mrb_true_value());
@@ -249,15 +252,16 @@ mrb_t_pass_result(mrb_state *mrb_dst, mrb_state *mrb_src)
 #define TEST_COUNT_PASS(name)                                           \
   do {                                                                  \
     res_src = mrb_gv_get(mrb_src, mrb_intern_lit(mrb_src, "$" #name));  \
-    if (mrb_fixnum_p(res_src)) {                                        \
+    if (mrb_integer_p(res_src)) {                                       \
       mrb_value res_dst = mrb_gv_get(mrb_dst, mrb_intern_lit(mrb_dst, "$" #name)); \
-      mrb_gv_set(mrb_dst, mrb_intern_lit(mrb_dst, "$" #name), mrb_fixnum_value(mrb_fixnum(res_dst) + mrb_fixnum(res_src))); \
+      mrb_gv_set(mrb_dst, mrb_intern_lit(mrb_dst, "$" #name), mrb_int_value(mrb_dst, mrb_integer(res_dst) + mrb_integer(res_src))); \
     }                                                                   \
   } while (FALSE)                                                       \
 
   TEST_COUNT_PASS(ok_test);
   TEST_COUNT_PASS(ko_test);
   TEST_COUNT_PASS(kill_test);
+  TEST_COUNT_PASS(warning_test);
   TEST_COUNT_PASS(skip_test);
 
 #undef TEST_COUNT_PASS
