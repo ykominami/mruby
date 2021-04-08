@@ -4,6 +4,16 @@
 MRUBY_ROOT = File.dirname(File.expand_path(__FILE__))
 MRUBY_BUILD_HOST_IS_CYGWIN = RUBY_PLATFORM.include?('cygwin')
 MRUBY_BUILD_HOST_IS_OPENBSD = RUBY_PLATFORM.include?('openbsd')
+MRUBY_BUILD_HOST_IS_MSWIN32 = RUBY_PLATFORM.include?('mswin32')
+if RUBY_PLATFORM.include?('mingw32')
+  if ENV['MSYSTEM']
+    MRUBY_BUILD_HOST_IS_MINGW32_IN_MSYSTEM = true
+    MRUBY_BUILD_HOST_IS_MINGW32 = false
+  else
+    MRUBY_BUILD_HOST_IS_MINGW32_IN_MSYSTEM = false
+    MRUBY_BUILD_HOST_IS_MINGW32 = true
+  end
+end
 
 # load build systems
 load "#{MRUBY_ROOT}/tasks/ruby_ext.rake"

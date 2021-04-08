@@ -16,8 +16,10 @@ MRuby::Build.new do |conf|
   #   g.cc.flags << '-g' # append cflags in this gem
   # end
   # conf.gem 'examples/mrbgems/c_and_ruby_extension_example'
-  # conf.gem :github => 'masuidrive/mrbgems-example', :checksum_hash => '76518e8aecd131d047378448ac8055fa29d974a9'
-  # conf.gem :git => 'git@github.com:masuidrive/mrbgems-example.git', :branch => 'master', :options => '-v'
+  # conf.gem :core => 'mruby-eval'
+  # conf.gem :mgem => 'mruby-io'
+  # conf.gem :github => 'iij/mruby-io'
+  # conf.gem :git => 'git@github.com:iij/mruby-io.git', :branch => 'master', :options => '-v'
 
   # include the default GEMs
   conf.gembox 'default'
@@ -82,6 +84,7 @@ MRuby::Build.new do |conf|
   # conf.enable_bintest
 end
 
+
 MRuby::Build.new('host-debug') do |conf|
   # load specific toolchain settings
 
@@ -94,7 +97,7 @@ MRuby::Build.new('host-debug') do |conf|
 
   enable_debug
 
-  # include the default GEMs
+  # include the default GEM
   conf.gembox 'default'
 
   # C compiler settings
@@ -107,6 +110,7 @@ MRuby::Build.new('host-debug') do |conf|
   # conf.enable_bintest
 end
 
+
 MRuby::Build.new('test') do |conf|
   # Gets set by the VS command prompts.
   if ENV['VisualStudioVersion'] || ENV['VSINSTALLDIR']
@@ -118,6 +122,18 @@ MRuby::Build.new('test') do |conf|
   enable_debug
   conf.enable_bintest
   conf.enable_test
+
+  conf.gembox 'default'
+end
+
+MRuby::Build.new('bench') do |conf|
+  # Gets set by the VS command prompts.
+  if ENV['VisualStudioVersion'] || ENV['VSINSTALLDIR']
+    toolchain :visualcpp
+  else
+    toolchain :gcc
+    conf.cc.flags << '-O3'
+  end
 
   conf.gembox 'default'
 end
