@@ -2,6 +2,8 @@ require "mruby-core-ext"
 require "mruby/build/load_gems"
 require "mruby/build/command"
 
+require 'shellwords'
+
 module MRuby
   autoload :Gem, "mruby/gem"
   autoload :Lockfile, "mruby/lockfile"
@@ -94,7 +96,6 @@ module MRuby
 
         MRuby.targets[@name] = self
       end
-
       MRuby::Build.current = MRuby.targets[@name]
       MRuby.targets[@name].instance_eval(&block)
 
@@ -273,6 +274,21 @@ EOS
         name.flatten.map { |n| filename(n) }
       else
         name.gsub('/', file_separator)
+      end
+    end
+
+    def to_path(mode, name)
+      if name.is_a?(Array)
+        name.flatten.map { |n| to_path(mode, n) }
+      else
+        case mode
+        when :CYGWIN_TO_WIN_WITH_ESCAPE
+          Shellwords.escape(`cygpath -w "#{filename(name)}"`.strip)
+        when :CYGWIN_TO_WIN
+          `cygpath -w "#{filename(name)}"`.strip
+        else
+          filename(name)
+        end
       end
     end
 
