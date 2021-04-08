@@ -1,6 +1,8 @@
 require "mruby/build/load_gems"
 require "mruby/build/command"
 
+require 'shellwords'
+
 module MRuby
   class << self
     def targets
@@ -92,7 +94,6 @@ module MRuby
 
         MRuby.targets[@name] = self
       end
-
       MRuby::Build.current = MRuby.targets[@name]
       MRuby.targets[@name].instance_eval(&block)
 
@@ -253,11 +254,18 @@ EOS
       end
     end
 
-    def cygwin_filename(name)
+    def to_path(mode, name)
       if name.is_a?(Array)
-        name.flatten.map { |n| cygwin_filename(n) }
+        name.flatten.map { |n| to_path(mode, n) }
       else
-        '"%s"' % `cygpath -w "#{filename(name)}"`.strip
+        case mode
+        when :CYGWIN_TO_WIN_WITH_ESCAPE
+          Shellwords.escape(`cygpath -w "#{filename(name)}"`.strip)
+        when :CYGWIN_TO_WIN
+          `cygpath -w "#{filename(name)}"`.strip
+        else
+          filename(name)
+        end
       end
     end
 
