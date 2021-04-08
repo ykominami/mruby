@@ -8,8 +8,7 @@ MRuby::Build.new do |conf|
     toolchain :gcc
   end
 
-  # Turn on `enable_debug` for better debugging
-  # enable_debug
+  enable_debug
 
   # Use mrbgems
   # conf.gem 'examples/mrbgems/ruby_extension_example'
@@ -18,9 +17,9 @@ MRuby::Build.new do |conf|
   # end
   # conf.gem 'examples/mrbgems/c_and_ruby_extension_example'
   # conf.gem :core => 'mruby-eval'
-  # conf.gem :mgem => 'mruby-onig-regexp'
-  # conf.gem :github => 'mattn/mruby-onig-regexp'
-  # conf.gem :git => 'git@github.com:mattn/mruby-onig-regexp.git', :branch => 'master', :options => '-v'
+  # conf.gem :mgem => 'mruby-io'
+  # conf.gem :github => 'iij/mruby-io'
+  # conf.gem :git => 'git@github.com:iij/mruby-io.git', :branch => 'master', :options => '-v'
 
   # include the default GEMs
   conf.gembox 'default'
@@ -29,10 +28,10 @@ MRuby::Build.new do |conf|
   #   cc.command = ENV['CC'] || 'gcc'
   #   cc.flags = [ENV['CFLAGS'] || %w()]
   #   cc.include_paths = ["#{root}/include"]
-  #   cc.defines = %w()
-  #   cc.option_include_path = %q[-I"%s"]
+  #   cc.defines = %w(DISABLE_GEMS)
+  #   cc.option_include_path = '-I%s'
   #   cc.option_define = '-D%s'
-  #   cc.compile_options = %Q[%{flags} -MMD -o "%{outfile}" -c "%{infile}"]
+  #   cc.compile_options = "%{flags} -MMD -o %{outfile} -c %{infile}"
   # end
 
   # mrbc settings
@@ -50,25 +49,25 @@ MRuby::Build.new do |conf|
   #   linker.library_paths = []
   #   linker.option_library = '-l%s'
   #   linker.option_library_path = '-L%s'
-  #   linker.link_options = "%{flags} -o "%{outfile}" %{objs} %{libs}"
+  #   linker.link_options = "%{flags} -o %{outfile} %{objs} %{libs}"
   # end
 
   # Archiver settings
   # conf.archiver do |archiver|
   #   archiver.command = ENV['AR'] || 'ar'
-  #   archiver.archive_options = 'rs "%{outfile}" %{objs}'
+  #   archiver.archive_options = 'rs %{outfile} %{objs}'
   # end
 
   # Parser generator settings
   # conf.yacc do |yacc|
   #   yacc.command = ENV['YACC'] || 'bison'
-  #   yacc.compile_options = %q[-o "%{outfile}" "%{infile}"]
+  #   yacc.compile_options = '-o %{outfile} %{infile}'
   # end
 
   # gperf settings
   # conf.gperf do |gperf|
   #   gperf.command = 'gperf'
-  #   gperf.compile_options = %q[-L ANSI-C -C -p -j1 -i 1 -g -o -t -N mrb_reserved_word -k"1,3,$" "%{infile}" > "%{outfile}"]
+  #   gperf.compile_options = '-L ANSI-C -C -p -j1 -i 1 -g -o -t -N mrb_reserved_word -k"1,3,$" %{infile} > %{outfile}'
   # end
 
   # file extensions
@@ -85,6 +84,7 @@ MRuby::Build.new do |conf|
   # conf.enable_bintest
 end
 
+
 MRuby::Build.new('host-debug') do |conf|
   # load specific toolchain settings
 
@@ -97,7 +97,7 @@ MRuby::Build.new('host-debug') do |conf|
 
   enable_debug
 
-  # include the default GEMs
+  # include the default GEM
   conf.gembox 'default'
 
   # C compiler settings
@@ -109,6 +109,7 @@ MRuby::Build.new('host-debug') do |conf|
   # bintest
   # conf.enable_bintest
 end
+
 
 MRuby::Build.new('test') do |conf|
   # Gets set by the VS command prompts.
@@ -125,17 +126,17 @@ MRuby::Build.new('test') do |conf|
   conf.gembox 'default'
 end
 
-#MRuby::Build.new('bench') do |conf|
-#  # Gets set by the VS command prompts.
-#  if ENV['VisualStudioVersion'] || ENV['VSINSTALLDIR']
-#    toolchain :visualcpp
-#  else
-#    toolchain :gcc
-#    conf.cc.flags << '-O3'
-#  end
-#
-#  conf.gembox 'default'
-#end
+MRuby::Build.new('bench') do |conf|
+  # Gets set by the VS command prompts.
+  if ENV['VisualStudioVersion'] || ENV['VSINSTALLDIR']
+    toolchain :visualcpp
+  else
+    toolchain :gcc
+    conf.cc.flags << '-O3'
+  end
+
+  conf.gembox 'default'
+end
 
 # Define cross build settings
 # MRuby::CrossBuild.new('32bit') do |conf|
@@ -149,6 +150,7 @@ end
 #   conf.gem 'examples/mrbgems/c_and_ruby_extension_example'
 #
 #   conf.test_runner.command = 'env'
+#
 # end
 
 load './build_config_arm.rb' if File.exist?('./build_config_arm.rb')
