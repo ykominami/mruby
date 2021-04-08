@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # The default build configuration file was moved to `build_config/default.rb`.
 #
 # Recommended way to customize the build configuration is:
