@@ -84,6 +84,7 @@ MRuby::Build.new do |conf|
   # conf.enable_bintest
 end
 
+
 MRuby::Build.new('host-debug') do |conf|
   # load specific toolchain settings
 
@@ -96,7 +97,7 @@ MRuby::Build.new('host-debug') do |conf|
 
   enable_debug
 
-  # include the default GEMs
+  # include the default GEM
   conf.gembox 'default'
 
   # C compiler settings
@@ -108,6 +109,7 @@ MRuby::Build.new('host-debug') do |conf|
   # bintest
   # conf.enable_bintest
 end
+
 
 MRuby::Build.new('test') do |conf|
   # Gets set by the VS command prompts.
