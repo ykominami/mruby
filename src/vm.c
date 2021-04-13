@@ -488,7 +488,7 @@ mrb_funcall_argv(mrb_state *mrb, mrb_value self, mrb_sym mid, mrb_int argc, cons
 #define CATCH_HANDLER_NUM_TO_BYTE(n) ((n) * sizeof(struct mrb_irep_catch_handler))
 
 static void
-mrb_exec_irep_prepare_posthook(mrb_state *mrb, mrb_callinfo *ci, int nregs, mrb_func_t posthook)
+exec_irep_prepare_posthook(mrb_state *mrb, mrb_callinfo *ci, int nregs, mrb_func_t posthook)
 {
   /*
    *  stack: [proc, errinfo, return value by called proc]
@@ -543,8 +543,8 @@ mrb_exec_irep_prepare_posthook(mrb_state *mrb, mrb_callinfo *ci, int nregs, mrb_
  *
  * However, if `proc` is a C function, it will be ignored.
  */
-mrb_value
-mrb_exec_irep(mrb_state *mrb, mrb_value self, struct RProc *p, mrb_func_t posthook)
+static mrb_value
+exec_irep(mrb_state *mrb, mrb_value self, struct RProc *p, mrb_func_t posthook)
 {
   mrb_callinfo *ci = mrb->c->ci;
   int keep, nregs;
@@ -567,12 +567,37 @@ mrb_exec_irep(mrb_state *mrb, mrb_value self, struct RProc *p, mrb_func_t postho
   }
 
   if (posthook) {
-    mrb_exec_irep_prepare_posthook(mrb, ci, (nregs < keep ? keep : nregs), posthook);
+    exec_irep_prepare_posthook(mrb, ci, (nregs < keep ? keep : nregs), posthook);
   }
 
   cipush(mrb, 0, 0, NULL, NULL, 0, 0);
 
   return self;
+}
+
+mrb_value
+mrb_exec_irep(mrb_state *mrb, mrb_value self, struct RProc *p, mrb_func_t posthook)
+{
+  mrb_callinfo *ci = mrb->c->ci;
+  if (ci->acc >= 0) {
+    return exec_irep(mrb, self, p, posthook);
+  }
+  else {
+    mrb_value ret;
+    if (MRB_PROC_CFUNC_P(p)) {
+      cipush(mrb, 0, CI_ACC_DIRECT, mrb_vm_ci_target_class(ci), p, ci->mid, ci->argc);
+      ret = MRB_PROC_CFUNC(p)(mrb, self);
+      cipop(mrb);
+    }
+    else {
+      int keep = (ci->argc < 0 ? 1 : ci->argc) + 2 /* receiver + block */;
+      ret = mrb_top_run(mrb, p, self, keep);
+    }
+    if (mrb->exc && mrb->jmp) {
+      mrb_exc_raise(mrb, mrb_obj_value(mrb->exc));
+    }
+    return ret;
+  }
 }
 
 /* 15.3.1.3.4  */
@@ -638,7 +663,7 @@ mrb_f_send(mrb_state *mrb, mrb_value self)
     }
     return MRB_METHOD_CFUNC(m)(mrb, self);
   }
-  return mrb_exec_irep(mrb, self, MRB_METHOD_PROC(m), NULL);
+  return exec_irep(mrb, self, MRB_METHOD_PROC(m), NULL);
 }
 
 static mrb_value
@@ -826,7 +851,7 @@ mrb_yield_cont(mrb_state *mrb, mrb_value b, mrb_value self, mrb_int argc, const 
   mrb->c->ci->stack[1] = mrb_ary_new_from_values(mrb, argc, argv);
   mrb->c->ci->stack[2] = mrb_nil_value();
   ci->argc = -1;
-  return mrb_exec_irep(mrb, self, p, NULL);
+  return exec_irep(mrb, self, p, NULL);
 }
 
 static struct RBreak*
