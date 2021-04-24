@@ -26,8 +26,9 @@ MRB_API mrb_value mrb_exc_new_str(mrb_state *mrb, struct RClass* c, mrb_value st
 #define mrb_exc_new_lit(mrb, c, lit) mrb_exc_new_str(mrb, c, mrb_str_new_lit(mrb, lit))
 #define mrb_exc_new_str_lit(mrb, c, lit) mrb_exc_new_lit(mrb, c, lit)
 MRB_API mrb_value mrb_make_exception(mrb_state *mrb, mrb_int argc, const mrb_value *argv);
-MRB_API mrb_value mrb_exc_backtrace(mrb_state *mrb, mrb_value exc);
-MRB_API mrb_value mrb_get_backtrace(mrb_state *mrb);
+mrb_value mrb_exc_backtrace(mrb_state *mrb, mrb_value exc);
+mrb_value mrb_get_backtrace(mrb_state *mrb);
+
 MRB_API mrb_noreturn void mrb_no_method_error(mrb_state *mrb, mrb_sym id, mrb_value args, const char *fmt, ...);
 
 /* declaration for `fail` method */
@@ -102,6 +103,13 @@ mrb_break_tag_set(struct RBreak *brk, uint32_t tag)
 
 /**
  * Protect
+ *
+ */
+typedef mrb_value mrb_protect_error_func(mrb_state *mrb, void *userdata);
+MRB_API mrb_value mrb_protect_error(mrb_state *mrb, mrb_protect_error_func *body, void *userdata, mrb_bool *error);
+
+/**
+ * Protect (takes mrb_value for body argument)
  *
  * Implemented in the mruby-error mrbgem
  */

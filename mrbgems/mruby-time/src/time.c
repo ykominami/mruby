@@ -226,6 +226,7 @@ typedef mrb_int mrb_sec;
                     (sizeof(time_t) <= 4 ? INT32_MAX : INT64_MAX)           \
 )
 
+#ifndef MRB_NO_FLOAT
 /* return true if time_t is fit in mrb_int */
 static mrb_bool
 fixable_time_t_p(time_t v)
@@ -236,6 +237,7 @@ fixable_time_t_p(time_t v)
   if (MRB_INT_MIN > (mrb_int)v) return FALSE;
   return TRUE;
 }
+#endif
 
 static time_t
 mrb_to_time_t(mrb_state *mrb, mrb_value obj, time_t *usec)
@@ -334,7 +336,7 @@ time_alloc_time(mrb_state *mrb, time_t sec, time_t usec, enum mrb_timezone timez
   tm = (struct mrb_time *)mrb_malloc(mrb, sizeof(struct mrb_time));
   tm->sec  = sec;
   tm->usec = usec;
-  if (tm->usec < 0) {
+  if (MRB_TIME_T_UINT && tm->usec < 0) {
     long sec2 = (long)NDIV(tm->usec,1000000); /* negative div */
     tm->usec -= sec2 * 1000000;
     tm->sec += sec2;
@@ -461,21 +463,28 @@ time_mktime(mrb_state *mrb, mrb_int ayear, mrb_int amonth, mrb_int aday,
   time_t nowsecs;
   struct tm nowtime = { 0 };
 
-  nowtime.tm_year  = (int)ayear  - 1900;
-  nowtime.tm_mon   = (int)amonth - 1;
+#if MRB_INT_MAX > INT_MAX
+#define OUTINT(x) (((MRB_TIME_T_UINT ? 0 : INT_MIN) > (x)) || (x) > INT_MAX)
+#else
+#define OUTINT(x) 0
+#endif
+
+  if (OUTINT(ayear-1900) ||
+      amonth  < 1 || amonth  > 12 ||
+      aday    < 1 || aday    > 31 ||
+      ahour   < 0 || ahour   > 24 ||
+      (ahour == 24 && (amin > 0 || asec > 0)) ||
+      amin    < 0 || amin    > 59 ||
+      asec    < 0 || asec    > 60)
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "argument out of range");
+
+  nowtime.tm_year  = (int)(ayear  - 1900);
+  nowtime.tm_mon   = (int)(amonth - 1);
   nowtime.tm_mday  = (int)aday;
   nowtime.tm_hour  = (int)ahour;
   nowtime.tm_min   = (int)amin;
   nowtime.tm_sec   = (int)asec;
   nowtime.tm_isdst = -1;
-
-  if (nowtime.tm_mon  < 0 || nowtime.tm_mon  > 11
-      || nowtime.tm_mday < 1 || nowtime.tm_mday > 31
-      || nowtime.tm_hour < 0 || nowtime.tm_hour > 24
-      || (nowtime.tm_hour == 24 && (nowtime.tm_min > 0 || nowtime.tm_sec > 0))
-      || nowtime.tm_min  < 0 || nowtime.tm_min  > 59
-      || nowtime.tm_sec  < 0 || nowtime.tm_sec  > 60)
-    mrb_raise(mrb, E_ARGUMENT_ERROR, "argument out of range");
 
   if (timezone == MRB_TIMEZONE_UTC) {
     nowsecs = timegm(&nowtime);

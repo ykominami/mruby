@@ -19,8 +19,6 @@ struct mrb_complex {
   mrb_float imaginary;
 };
 
-#include <mruby/istruct.h>
-
 #if defined(MRB_32BIT) && !defined(MRB_USE_FLOAT32)
 
 struct RComplex {
@@ -300,7 +298,7 @@ complex_div(mrb_state *mrb, mrb_value self)
 
   b = complex_ptr(mrb, rhs);
 
-  /* Split floating point components into significand and exponent */
+  /* Split floating-point components into significand and exponent */
   ar.s = F(frexp)(a->real, &ar.x);
   ai.s = F(frexp)(a->imaginary, &ai.x);
   br.s = F(frexp)(b->real, &br.x);

@@ -76,46 +76,44 @@ int_zerodiv(mrb_state *mrb)
 static mrb_value
 int_pow(mrb_state *mrb, mrb_value x)
 {
-  mrb_int base = mrb_int(mrb, x);
+  mrb_int base = mrb_integer(x);
+  mrb_int result = 1;
   mrb_int exp;
+
 #ifndef MRB_NO_FLOAT
   mrb_value y = mrb_get_arg1(mrb);
-  mrb_float z;
 
-  if (!mrb_integer_p(y)) {
-    mrb_get_args(mrb, "f", &z);
-    z = pow((mrb_float)base, z);
-    return mrb_float_value(mrb, z);
+  if (mrb_float_p(y)) {
+    return mrb_float_value(mrb, pow((double)base, mrb_float(y)));
   }
-  else {
+  else if (mrb_integer_p(y)) {
+    exp = mrb_integer(y);
+  }
+  else
+#endif
+  {
     mrb_get_args(mrb, "i", &exp);
-    z = pow((double)base, (double)exp);
-    if (exp < 0 || z < (mrb_float)MRB_INT_MIN || (mrb_float)MRB_INT_MAX < z) {
-      return mrb_float_value(mrb, z);
-    }
   }
-  return mrb_int_value(mrb, (mrb_int)z);
-#else
-  mrb_int result = 1;
-
-  mrb_get_args(mrb, "i", &exp);
   if (exp < 0) {
-    return mrb_fixnum_value(0);
+#ifndef MRB_NO_FLOAT
+    return mrb_float_value(mrb, pow((double)base, (double)exp));
+#else
+    int_overflow(mrb, "negative power");
+#endif
   }
   for (;;) {
     if (exp & 1) {
       if (mrb_int_mul_overflow(result, base, &result)) {
-        int_overflow(mrb, "multiplication");
+        int_overflow(mrb, "power");
       }
     }
     exp >>= 1;
     if (exp == 0) break;
     if (mrb_int_mul_overflow(base, base, &base)) {
-      int_overflow(mrb, "multiplication");
+      int_overflow(mrb, "power");
     }
   }
   return mrb_int_value(mrb, result);
-#endif
 }
 
 mrb_int
@@ -139,7 +137,9 @@ mrb_div_int(mrb_state *mrb, mrb_int x, mrb_int y)
   return 0;
 }
 
+#ifndef MRB_NO_FLOAT
 mrb_float mrb_div_flo(mrb_float x, mrb_float y);
+#endif
 
 /* 15.2.8.3.4  */
 /* 15.2.9.3.4  */
@@ -232,7 +232,7 @@ coerce_step_counter(mrb_state *mrb, mrb_value self)
  * Document-class: Float
  *
  *  <code>Float</code> objects represent inexact real numbers using
- *  the native architecture's double-precision floating point
+ *  the native architecture's double-precision floating-point
  *  representation.
  */
 
@@ -812,7 +812,7 @@ flo_ceil(mrb_state *mrb, mrb_value num)
  *     flt.round([ndigits])  ->  integer or float
  *
  *  Rounds <i>flt</i> to a given precision in decimal digits (default 0 digits).
- *  Precision may be negative.  Returns a floating point number when ndigits
+ *  Precision may be negative.  Returns a floating-point number when ndigits
  *  is more than zero.
  *
  *     1.4.round      #=> 1
@@ -1610,11 +1610,11 @@ cmpnum(mrb_state *mrb, mrb_value v1, mrb_value v2)
   case MRB_TT_FLOAT:
     y = mrb_float(v2);
     break;
-#endif
 #ifdef MRB_USE_RATIONAL
   case MRB_TT_RATIONAL:
     y = mrb_to_flo(mrb, v2);
     break;
+#endif
 #endif
   default:
     return -2;
@@ -1765,12 +1765,6 @@ mrb_init_numeric(mrb_state *mrb)
 
   mrb_define_method(mrb, integer, "to_i",     int_to_i,        MRB_ARGS_NONE()); /* 15.2.8.3.24 */
   mrb_define_method(mrb, integer, "to_int",   int_to_i,        MRB_ARGS_NONE());
-#ifndef MRB_NO_FLOAT
-  mrb_define_method(mrb, integer, "ceil",     int_to_i,        MRB_ARGS_NONE()); /* 15.2.8.3.14 */
-  mrb_define_method(mrb, integer, "floor",    int_to_i,        MRB_ARGS_NONE()); /* 15.2.8.3.17 */
-  mrb_define_method(mrb, integer, "round",    int_to_i,        MRB_ARGS_NONE()); /* 15.2.8.3.20 */
-  mrb_define_method(mrb, integer, "truncate", int_to_i,        MRB_ARGS_NONE()); /* 15.2.8.3.26 */
-#endif
 
   mrb_define_method(mrb, integer, "+",        int_add,         MRB_ARGS_REQ(1)); /* 15.2.8.3.1 */
   mrb_define_method(mrb, integer, "-",        int_sub,         MRB_ARGS_REQ(1)); /* 15.2.8.3.2 */

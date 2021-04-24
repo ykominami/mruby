@@ -92,9 +92,9 @@ assert 'Method#call' do
   assert_equal 42, klass2.new.method(:foo).call
 
   i = Class.new {
-   def bar
-     yield 3
-   end
+    def bar
+      yield 3
+    end
   }.new
   assert_raise(LocalJumpError) { i.method(:bar).call }
   assert_equal 3, i.method(:bar).call { |i| i }
@@ -406,8 +406,9 @@ end
 assert 'UnboundMethod#==' do
   assert_false(Integer.instance_method(:+) == Integer.instance_method(:-))
   assert_true(Integer.instance_method(:+) == Integer.instance_method(:+))
-  assert_false(Integer.instance_method(:+) == Float.instance_method(:+))
   assert_true(UnboundMethod.instance_method(:==) == UnboundMethod.instance_method(:eql?))
+  skip unless Object.const_defined?(:Float)
+  assert_false(Integer.instance_method(:+) == Float.instance_method(:+))
 end
 
 assert 'UnboundMethod#super_method' do
