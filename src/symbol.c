@@ -334,14 +334,6 @@ mrb_sym_name_len(mrb_state *mrb, mrb_sym sym, mrb_int *lenp)
 #endif
 }
 
-mrb_bool
-mrb_sym_static_p(mrb_state *mrb, mrb_sym sym)
-{
-  if (SYMBOL_INLINE_P(sym)) return TRUE;
-  if (sym > MRB_PRESYM_MAX) return FALSE;
-  return TRUE;
-}
-
 void
 mrb_free_symtbl(mrb_state *mrb)
 {
@@ -397,17 +389,40 @@ mrb_init_symtbl(mrb_state *mrb)
 /* 15.2.11.3.3  */
 /*
  *  call-seq:
- *     sym.id2name   -> string
  *     sym.to_s      -> string
  *
  *  Returns the name or string corresponding to <i>sym</i>.
  *
- *     :fred.id2name   #=> "fred"
+ *     :fred.to_s   #=> "fred"
  */
 static mrb_value
 sym_to_s(mrb_state *mrb, mrb_value sym)
 {
   return mrb_sym_str(mrb, mrb_symbol(sym));
+}
+
+/*
+ *  call-seq:
+ *     sym.name   -> string
+ *
+ *  Returns the name or string corresponding to <i>sym</i>. Unlike #to_s, the
+ *  returned string is frozen.
+ *
+ *     :fred.name         #=> "fred"
+ *     :fred.name.frozen? #=> true
+ */
+static mrb_value
+sym_name(mrb_state *mrb, mrb_value vsym)
+{
+  mrb_sym sym = mrb_symbol(vsym);
+  mrb_int len;
+  const char *name = mrb_sym_name_len(mrb, sym, &len);
+
+  mrb_assert(name != NULL);
+  if (SYMBOL_INLINE_P(sym)) {
+    return mrb_str_new_frozen(mrb, name, len);
+  }
+  return mrb_str_new_static_frozen(mrb, name, len);
 }
 
 /* 15.2.11.3.4  */
@@ -596,7 +611,7 @@ mrb_sym_str(mrb_state *mrb, mrb_sym sym)
 }
 
 static const char*
-sym_name(mrb_state *mrb, mrb_sym sym, mrb_bool dump)
+sym_cstr(mrb_state *mrb, mrb_sym sym, mrb_bool dump)
 {
   mrb_int len;
   const char *name = mrb_sym_name_len(mrb, sym, &len);
@@ -615,13 +630,13 @@ sym_name(mrb_state *mrb, mrb_sym sym, mrb_bool dump)
 MRB_API const char*
 mrb_sym_name(mrb_state *mrb, mrb_sym sym)
 {
-  return sym_name(mrb, sym, FALSE);
+  return sym_cstr(mrb, sym, FALSE);
 }
 
 MRB_API const char*
 mrb_sym_dump(mrb_state *mrb, mrb_sym sym)
 {
-  return sym_name(mrb, sym, TRUE);
+  return sym_cstr(mrb, sym, TRUE);
 }
 
 #define lesser(a,b) (((a)>(b))?(b):(a))
@@ -665,8 +680,8 @@ mrb_init_symbol(mrb_state *mrb)
   MRB_SET_INSTANCE_TT(sym, MRB_TT_SYMBOL);
   mrb_undef_class_method(mrb,  sym, "new");
 
-  mrb_define_method(mrb, sym, "id2name", sym_to_s,    MRB_ARGS_NONE());          /* 15.2.11.3.2 */
   mrb_define_method(mrb, sym, "to_s",    sym_to_s,    MRB_ARGS_NONE());          /* 15.2.11.3.3 */
+  mrb_define_method(mrb, sym, "name",    sym_name,    MRB_ARGS_NONE());
   mrb_define_method(mrb, sym, "to_sym",  sym_to_sym,  MRB_ARGS_NONE());          /* 15.2.11.3.4 */
   mrb_define_method(mrb, sym, "inspect", sym_inspect, MRB_ARGS_NONE());          /* 15.2.11.3.5(x) */
   mrb_define_method(mrb, sym, "<=>",     sym_cmp,     MRB_ARGS_REQ(1));
