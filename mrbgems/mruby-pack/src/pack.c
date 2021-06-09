@@ -23,7 +23,7 @@ struct tmpl {
   int idx;
 };
 
-enum {
+enum pack_dir {
   PACK_DIR_CHAR,      /* C */
   PACK_DIR_SHORT,     /* S */
   PACK_DIR_LONG,      /* L */
@@ -37,11 +37,12 @@ enum {
   PACK_DIR_STR,       /* A */
   PACK_DIR_HEX,       /* h */
   PACK_DIR_BASE64,    /* m */
+  PACK_DIR_QENC,      /* M */
   PACK_DIR_NUL,       /* x */
   PACK_DIR_INVALID
 };
 
-enum {
+enum pack_type {
   PACK_TYPE_INTEGER,
   PACK_TYPE_FLOAT,
   PACK_TYPE_STRING,
@@ -76,7 +77,7 @@ hex2int(unsigned char ch)
   else if (ch >= 'a' && ch <= 'f')
     return 10 + (ch - 'a');
   else
-    return 0;
+    return -1;
 }
 
 static void
@@ -724,10 +725,12 @@ pack_h(mrb_state *mrb, mrb_value src, mrb_value dst, mrb_int didx, long count, u
     a = b = 0;
     if (slen > 0) {
       a = hex2int(*sptr++);
+      if (a < 0) break;
       slen--;
     }
     if (slen > 0) {
       b = hex2int(*sptr++);
+      if (b < 0) break;
       slen--;
     }
     *dptr++ = (a << ashift) + (b << bshift);
@@ -907,6 +910,100 @@ done:
 }
 
 static int
+pack_M(mrb_state *mrb, mrb_value src, mrb_value dst, mrb_int didx, long count, unsigned int flags)
+{
+  static const char hex_table[] = "0123456789ABCDEF";
+  char buff[1024];
+  char *s = RSTRING_PTR(src);
+  char *send = s + RSTRING_LEN(src);
+  int i = 0, n = 0, prev = EOF;
+  int dlen = 0;
+
+  if (count <= 1) count = 72;
+  while (s < send) {
+    if ((*s > 126) ||
+        (*s < 32 && *s != '\n' && *s != '\t') ||
+        (*s == '=')) {
+      buff[i++] = '=';
+      buff[i++] = hex_table[(*s & 0xf0) >> 4];
+      buff[i++] = hex_table[*s & 0x0f];
+      n += 3;
+      prev = EOF;
+    }
+    else if (*s == '\n') {
+      if (prev == ' ' || prev == '\t') {
+        buff[i++] = '=';
+        buff[i++] = *s;
+      }
+      buff[i++] = *s;
+      n = 0;
+      prev = *s;
+    }
+    else {
+      buff[i++] = *s;
+      n++;
+      prev = *s;
+    }
+    if (n > count) {
+      buff[i++] = '=';
+      buff[i++] = '\n';
+      n = 0;
+      prev = '\n';
+    }
+    if (i > 1024 - 5) {
+      str_len_ensure(mrb, dst, didx+i);
+      memcpy(RSTRING_PTR(dst), buff, i);
+      dlen += i;
+      i = 0;
+    }
+    s++;
+  }
+  if (n > 0) {
+    buff[i++] = '=';
+    buff[i++] = '\n';
+  }
+  if (i > 0) {
+    str_len_ensure(mrb, dst, didx+i);
+    memcpy(RSTRING_PTR(dst), buff, i);
+    dlen += i;
+  }
+  return dlen;
+}
+
+static int
+unpack_M(mrb_state *mrb, const void *src, int slen, mrb_value ary, unsigned int flags)
+{
+  mrb_value buf = mrb_str_new(mrb, 0, slen);
+  const char *s = (const char*)src, *ss = s;
+  const char *send = s + slen;
+  char *ptr = RSTRING_PTR(buf);
+  int c1, c2;
+
+  while (s < send) {
+    if (*s == '=') {
+      if (++s == send) break;
+      if (s+1 < send && *s == '\r' && *(s+1) == '\n')
+        s++;
+      if (*s != '\n') {
+        if ((c1 = hex2int(*s)) == -1) break;
+        if (++s == send) break;
+        if ((c2 = hex2int(*s)) == -1) break;
+        *ptr++ = (char)(c1 << 4 | c2);
+      }
+    }
+    else {
+      *ptr++ = *s;
+    }
+    s++;
+    ss = s;
+  }
+  buf = mrb_str_resize(mrb, buf, (mrb_int)(ptr - RSTRING_PTR(buf)));
+  mrb_str_cat(mrb, buf, ss, send-ss);
+  mrb_ary_push(mrb, ary, buf);
+  return slen;
+}
+
+static int
 pack_x(mrb_state *mrb, mrb_value src, mrb_value dst, mrb_int didx, long count, unsigned int flags)
 {
   long i;
@@ -918,6 +1015,7 @@ pack_x(mrb_state *mrb, mrb_value src, mrb_value dst, mrb_int didx, long count, u
   }
   return count;
 }
+
 static int
 unpack_x(mrb_state *mrb, const void *src, int slen, mrb_value ary, int count, unsigned int flags)
 {
@@ -942,10 +1040,12 @@ has_tmpl(const struct tmpl *tmpl)
 }
 
 static void
-read_tmpl(mrb_state *mrb, struct tmpl *tmpl, int *dirp, int *typep, int *sizep, int *countp, unsigned int *flagsp)
+read_tmpl(mrb_state *mrb, struct tmpl *tmpl, enum pack_dir *dirp, enum pack_type *typep, int *sizep, int *countp, unsigned int *flagsp)
 {
   mrb_int t, tlen;
-  int ch, dir, type, size = 0;
+  int ch, size = 0;
+  enum pack_dir dir;
+  enum pack_type type;
   int count = 1;
   unsigned int flags = 0;
   const char *tptr;
@@ -1057,6 +1157,11 @@ alias:
     type = PACK_TYPE_STRING;
     flags |= PACK_FLAG_WIDTH | PACK_FLAG_COUNT2;
     break;
+  case 'M':
+    dir = PACK_DIR_QENC;
+    type = PACK_TYPE_STRING;
+    flags |= PACK_FLAG_WIDTH | PACK_FLAG_COUNT2;
+    break;
   case 'N':  /* = "L>" */
     dir = PACK_DIR_LONG;
     type = PACK_TYPE_INTEGER;
@@ -1116,6 +1221,11 @@ alias:
     type = PACK_TYPE_STRING;
     flags |= PACK_FLAG_WIDTH | PACK_FLAG_COUNT2 | PACK_FLAG_Z;
     break;
+  case 'p': case 'P':
+  case 'X':
+  case '%': case '@':
+    mrb_raisef(mrb, E_ARGUMENT_ERROR, "%c is not supported", (char)t);
+    break;
   default:
     dir = PACK_DIR_INVALID;
     type = PACK_TYPE_NONE;
@@ -1128,10 +1238,10 @@ alias:
     if (ISDIGIT(ch)) {
       count = ch - '0';
       while (tmpl->idx < tlen && ISDIGIT(tptr[tmpl->idx])) {
-        int ch = tptr[tmpl->idx++] - '0';
-        if (count+ch > INT_MAX/10) {
+        if (count+10 > INT_MAX/10) {
           mrb_raise(mrb, E_RUNTIME_ERROR, "too big template length");
         }
+        ch = tptr[tmpl->idx++] - '0';
         count = count * 10 + ch;
       }
       continue;  /* special case */
@@ -1173,7 +1283,9 @@ mrb_pack_pack(mrb_state *mrb, mrb_value ary)
   struct tmpl tmpl;
   int count;
   unsigned int flags;
-  int dir, ridx, size, type;
+  enum pack_dir dir;
+  enum pack_type type;
+  int ridx, size;
 
   prepare_tmpl(mrb, &tmpl);
 
@@ -1186,8 +1298,8 @@ mrb_pack_pack(mrb_state *mrb, mrb_value ary)
     if (dir == PACK_DIR_INVALID)
       continue;
     else if (dir == PACK_DIR_NUL) {
+      if (count > 0 && ridx > INT_MAX - count) goto overflow;
       ridx += pack_x(mrb, mrb_nil_value(), result, ridx, count, flags);
-      if (ridx < 0) goto overflow;
       continue;
     }
 
@@ -1205,7 +1317,7 @@ mrb_pack_pack(mrb_state *mrb, mrb_value ary)
 #ifndef MRB_NO_FLOAT
       else if (type == PACK_TYPE_FLOAT) {
         if (!mrb_float_p(o)) {
-          mrb_float f = mrb_to_flo(mrb, o);
+          mrb_float f = mrb_as_float(mrb, o);
           o = mrb_float_value(mrb, f);
         }
       }
@@ -1231,6 +1343,9 @@ mrb_pack_pack(mrb_state *mrb, mrb_value ary)
         break;
       case PACK_DIR_BASE64:
         ridx += pack_m(mrb, o, result, ridx, count, flags);
+        break;
+      case PACK_DIR_QENC:
+        ridx += pack_M(mrb, o, result, ridx, count, flags);
         break;
       case PACK_DIR_HEX:
         ridx += pack_h(mrb, o, result, ridx, count, flags);
@@ -1278,7 +1393,9 @@ pack_unpack(mrb_state *mrb, mrb_value str, int single)
   struct tmpl tmpl;
   int count;
   unsigned int flags;
-  int dir, size, type;
+  enum pack_dir dir;
+  enum pack_type type;
+  int size;
   int srcidx, srclen;
   const unsigned char *sptr;
 
@@ -1309,6 +1426,11 @@ pack_unpack(mrb_state *mrb, mrb_value str, int single)
         break;
       case PACK_DIR_BASE64:
         srcidx += unpack_m(mrb, sptr, srclen - srcidx, result, flags);
+        break;
+      case PACK_DIR_QENC:
+        srcidx += unpack_M(mrb, sptr, srclen - srcidx, result, flags);
+        break;
+      default:
         break;
       }
       continue;

@@ -409,7 +409,7 @@ mrb_check_type(mrb_state *mrb, mrb_value x, enum mrb_vtype t)
     ename = "nil";
   }
   else if (mrb_integer_p(x)) {
-    ename = "Fixnum";
+    ename = "Integer";
   }
   else if (mrb_symbol_p(x)) {
     ename = "Symbol";
@@ -513,7 +513,7 @@ mrb_to_int(mrb_state *mrb, mrb_value val)
   if (!mrb_integer_p(val)) {
 #ifndef MRB_NO_FLOAT
     if (mrb_float_p(val)) {
-      return mrb_flo_to_fixnum(mrb, val);
+      return mrb_float_to_integer(mrb, val);
     }
 #endif
     if (mrb_string_p(val)) {
@@ -537,7 +537,7 @@ mrb_convert_to_integer(mrb_state *mrb, mrb_value val, mrb_int base)
 #ifndef MRB_NO_FLOAT
     case MRB_TT_FLOAT:
       if (base != 0) goto arg_error;
-      return mrb_flo_to_fixnum(mrb, val);
+      return mrb_float_to_integer(mrb, val);
 #endif
 
     case MRB_TT_INTEGER:
@@ -564,15 +564,9 @@ arg_error:
   return mrb_to_int(mrb, val);
 }
 
-MRB_API mrb_value
-mrb_Integer(mrb_state *mrb, mrb_value val)
-{
-  return mrb_convert_to_integer(mrb, val, 0);
-}
-
 #ifndef MRB_NO_FLOAT
 MRB_API mrb_value
-mrb_Float(mrb_state *mrb, mrb_value val)
+mrb_to_float(mrb_state *mrb, mrb_value val)
 {
   if (mrb_nil_p(val)) {
     mrb_raise(mrb, E_TYPE_ERROR, "can't convert nil into Float");

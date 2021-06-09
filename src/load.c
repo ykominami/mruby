@@ -60,8 +60,6 @@ str_to_double(mrb_state *mrb, const char *p)
 }
 #endif
 
-mrb_value mrb_str_len_to_inum(mrb_state *mrb, const char *str, size_t len, mrb_int base, int badcheck);
-
 static mrb_bool
 read_irep_record_1(mrb_state *mrb, const uint8_t *bin, size_t *len, uint8_t flags, mrb_irep **irepp)
 {
@@ -146,7 +144,7 @@ read_irep_record_1(mrb_state *mrb, const uint8_t *bin, size_t *len, uint8_t flag
         }
         break;
       case IREP_TT_INT64:
-#ifdef MRB_64BIT
+#ifdef MRB_INT64
         {
           uint64_t i64 = bin_to_uint32(src);
           src += sizeof(uint32_t);
@@ -158,7 +156,7 @@ read_irep_record_1(mrb_state *mrb, const uint8_t *bin, size_t *len, uint8_t flag
         }
         break;
 #else
-        return FALSE;           /* INT64 not supported on MRB_32BIT */
+        return FALSE;
 #endif
 
       case IREP_TT_BIGINT:

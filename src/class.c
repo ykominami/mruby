@@ -1151,7 +1151,7 @@ mrb_get_args(mrb_state *mrb, const char *format, ...)
 
         p = va_arg(ap, mrb_float*);
         if (i < argc) {
-          *p = mrb_to_flo(mrb, argv[i++]);
+          *p = mrb_as_float(mrb, argv[i]); i++;
         }
       }
       break;
@@ -1162,7 +1162,7 @@ mrb_get_args(mrb_state *mrb, const char *format, ...)
 
         p = va_arg(ap, mrb_int*);
         if (i < argc) {
-          *p = mrb_integer(mrb_to_int(mrb, argv[i++]));
+          *p = mrb_as_int(mrb, argv[i]); i++;
         }
       }
       break;
@@ -2197,6 +2197,7 @@ mrb_obj_class(mrb_state *mrb, mrb_value obj)
 MRB_API void
 mrb_alias_method(mrb_state *mrb, struct RClass *c, mrb_sym a, mrb_sym b)
 {
+  if (a == b) return;
   mrb_method_t m = mrb_method_search(mrb, c, b);
 
   if (!MRB_METHOD_CFUNC_P(m)) {
@@ -2216,6 +2217,7 @@ mrb_alias_method(mrb_state *mrb, struct RClass *c, mrb_sym a, mrb_sym b)
       }
       p->e.env = e;
       p->flags |= MRB_PROC_ENVSET;
+      mrb_field_write_barrier(mrb, (struct RBasic*)p, (struct RBasic*)e);
     }
   }
   mrb_define_method_raw(mrb, c, a, m);
