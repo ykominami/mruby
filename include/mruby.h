@@ -1004,6 +1004,11 @@ MRB_API const mrb_value *mrb_get_argv(mrb_state *mrb);
  */
 MRB_API mrb_value mrb_get_arg1(mrb_state *mrb);
 
+/**
+ * Check if a block argument is given from mrb_state.
+ */
+MRB_API mrb_bool mrb_block_given_p(mrb_state *mrb);
+
 /* `strlen` for character string literals (use with caution or `strlen` instead)
     Adjacent string literals are concatenated in C/C++ in translation phase 6.
     If `lit` is not one, the compiler will report a syntax error:
@@ -1125,6 +1130,17 @@ MRB_API void *mrb_realloc_simple(mrb_state*, void*, size_t); /* return NULL if n
 MRB_API void *mrb_malloc_simple(mrb_state*, size_t);  /* return NULL if no memory available */
 MRB_API struct RBasic *mrb_obj_alloc(mrb_state*, enum mrb_vtype, struct RClass*);
 MRB_API void mrb_free(mrb_state*, void*);
+
+/**
+ * Allocates a Ruby object that matches the constant literal defined in
+ * `enum mrb_vtype` and returns a pointer to the corresponding C type.
+ *
+ * @param mrb   The current mruby state
+ * @param tt    The constant literal of `enum mrb_vtype`
+ * @param klass A Class object
+ * @return      Reference to the newly created object
+ */
+#define MRB_OBJ_ALLOC(mrb, tt, klass) ((MRB_VTYPE_TYPEOF(tt)*)mrb_obj_alloc(mrb, tt, klass))
 
 MRB_API mrb_value mrb_str_new(mrb_state *mrb, const char *p, size_t len);
 

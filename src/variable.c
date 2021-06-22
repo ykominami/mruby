@@ -766,16 +766,17 @@ mod_const_check(mrb_state *mrb, mrb_value mod)
 }
 
 static mrb_value
-const_get(mrb_state *mrb, struct RClass *base, mrb_sym sym)
+const_get(mrb_state *mrb, struct RClass *base, mrb_sym sym, mrb_bool skip)
 {
   struct RClass *c = base;
   mrb_value v;
   mrb_bool retry = FALSE;
   mrb_value name;
 
+  if (skip) c = c->super;
 L_RETRY:
   while (c) {
-    if (c->iv) {
+    if (!MRB_FLAG_TEST(c, MRB_FL_CLASS_IS_PREPENDED) && c->iv) {
       if (iv_get(mrb, c->iv, sym, &v))
         return v;
     }
@@ -794,7 +795,7 @@ MRB_API mrb_value
 mrb_const_get(mrb_state *mrb, mrb_value mod, mrb_sym sym)
 {
   mod_const_check(mrb, mod);
-  return const_get(mrb, mrb_class_ptr(mod), sym);
+  return const_get(mrb, mrb_class_ptr(mod), sym, FALSE);
 }
 
 mrb_value
@@ -803,9 +804,9 @@ mrb_vm_const_get(mrb_state *mrb, mrb_sym sym)
   struct RClass *c;
   struct RClass *c2;
   mrb_value v;
-  const struct RProc *proc;
+  const struct RProc *proc = mrb->c->ci->proc;
 
-  c = MRB_PROC_TARGET_CLASS(mrb->c->ci->proc);
+  c = MRB_PROC_TARGET_CLASS(proc);
   if (!c) c = mrb->object_class;
   if (iv_get(mrb, c->iv, sym, &v)) {
     return v;
@@ -821,8 +822,7 @@ mrb_vm_const_get(mrb_state *mrb, mrb_sym sym)
     c2 = mrb_class_ptr(klass);
   }
   if (c2 && (c2->tt == MRB_TT_CLASS || c2->tt == MRB_TT_MODULE)) c = c2;
-  mrb_assert(!MRB_PROC_CFUNC_P(mrb->c->ci->proc));
-  proc = mrb->c->ci->proc;
+  proc = proc->upper;
   while (proc) {
     c2 = MRB_PROC_TARGET_CLASS(proc);
     if (c2 && iv_get(mrb, c2->iv, sym, &v)) {
@@ -830,7 +830,7 @@ mrb_vm_const_get(mrb_state *mrb, mrb_sym sym)
     }
     proc = proc->upper;
   }
-  return const_get(mrb, c, sym);
+  return const_get(mrb, c, sym, TRUE);
 }
 
 MRB_API void

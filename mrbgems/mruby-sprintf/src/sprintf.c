@@ -245,7 +245,6 @@ check_name_arg(mrb_state *mrb, int posarg, const char *name, size_t len)
 #define GETASTER(num) do { \
   mrb_value tmp_v; \
   t = p++; \
-  n = 0; \
   GETNUM(n, val); \
   if (*p == '$') { \
     tmp_v = GETPOSARG(n); \
@@ -260,21 +259,11 @@ check_name_arg(mrb_state *mrb, int posarg, const char *name, size_t len)
 static const char *
 get_num(mrb_state *mrb, const char *p, const char *end, int *valp)
 {
-  mrb_int next_n = (int)*valp;
-  for (; p < end && ISDIGIT(*p); p++) {
-    if (mrb_int_mul_overflow(10, next_n, &next_n)) {
-      return NULL;
-    }
-    if (MRB_INT_MAX - (*p - '0') < next_n) {
-      return NULL;
-    }
-    next_n += *p - '0';
-  }
-  if (p >= end) {
-    mrb_raise(mrb, E_ARGUMENT_ERROR, "malformed format string - %%*[0-9]");
-  }
-  *valp = (int)next_n;
-  return p;
+  char *e;
+  mrb_int n = mrb_int_read(p, end, &e);
+  if (e == NULL || n > INT_MAX) return NULL;
+  *valp = (int)n;
+  return e;
 }
 
 static void
@@ -664,7 +653,6 @@ retry:
 
       case '1': case '2': case '3': case '4':
       case '5': case '6': case '7': case '8': case '9':
-        n = 0;
         GETNUM(n, width);
         if (*p == '$') {
           if (!mrb_undef_p(nextvalue)) {
@@ -721,7 +709,6 @@ retry:
         }
         flags |= FPREC|FPREC0;
 
-        prec = 0;
         p++;
         if (*p == '*') {
           GETASTER(prec);
@@ -731,7 +718,6 @@ retry:
           p++;
           goto retry;
         }
-
         GETNUM(prec, precision);
         goto retry;
 

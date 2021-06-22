@@ -341,7 +341,7 @@ prepare_singleton_class(mrb_state *mrb, struct RBasic *o)
   struct RClass *sc, *c;
 
   if (o->c->tt == MRB_TT_SCLASS) return;
-  sc = (struct RClass*)mrb_obj_alloc(mrb, MRB_TT_SCLASS, mrb->class_class);
+  sc = MRB_OBJ_ALLOC(mrb, MRB_TT_SCLASS, mrb->class_class);
   sc->flags |= MRB_FL_CLASS_IS_INHERITED;
   sc->mt = mt_new(mrb);
   sc->iv = 0;
@@ -859,6 +859,17 @@ mrb_get_arg1(mrb_state *mrb)
   return array_argv[0];
 }
 
+MRB_API mrb_bool
+mrb_block_given_p(mrb_state *mrb)
+{
+  const mrb_callinfo *ci = mrb->c->ci;
+  int argc = ci->argc;
+  int idx = (argc < 0) ? 2 : argc + 1;
+  mrb_value b = ci->stack[idx];
+
+  return !mrb_nil_p(b);
+}
+
 void mrb_hash_check_kdict(mrb_state *mrb, mrb_value self);
 
 /*
@@ -1344,7 +1355,7 @@ boot_defclass(mrb_state *mrb, struct RClass *super)
 {
   struct RClass *c;
 
-  c = (struct RClass*)mrb_obj_alloc(mrb, MRB_TT_CLASS, mrb->class_class);
+  c = MRB_OBJ_ALLOC(mrb, MRB_TT_CLASS, mrb->class_class);
   if (super) {
     c->super = super;
     mrb_field_write_barrier(mrb, (struct RBasic*)c, (struct RBasic*)super);
@@ -1367,7 +1378,7 @@ boot_initmod(mrb_state *mrb, struct RClass *mod)
 static struct RClass*
 include_class_new(mrb_state *mrb, struct RClass *m, struct RClass *super)
 {
-  struct RClass *ic = (struct RClass*)mrb_obj_alloc(mrb, MRB_TT_ICLASS, mrb->class_class);
+  struct RClass *ic = MRB_OBJ_ALLOC(mrb, MRB_TT_ICLASS, mrb->class_class);
   if (m->tt == MRB_TT_ICLASS) {
     m = m->c;
   }
@@ -1435,7 +1446,7 @@ fix_include_module(mrb_state *mrb, struct RBasic *obj, void *data)
 {
   struct RClass **m = (struct RClass**)data;
 
-  if (obj->tt == MRB_TT_ICLASS && obj->c == m[0] && (obj->flags & MRB_FL_CLASS_IS_ORIGIN) == 0) {
+  if (obj->tt == MRB_TT_ICLASS && obj->c == m[0] && !MRB_FLAG_TEST(obj, MRB_FL_CLASS_IS_ORIGIN)) {
     struct RClass *ic = (struct RClass*)obj;
     include_module_at(mrb, ic, ic, m[1], 1);
   }
@@ -1498,7 +1509,7 @@ mrb_prepend_module(mrb_state *mrb, struct RClass *c, struct RClass *m)
     else {
       c0 = c;
     }
-    origin = (struct RClass*)mrb_obj_alloc(mrb, MRB_TT_ICLASS, c0);
+    origin = MRB_OBJ_ALLOC(mrb, MRB_TT_ICLASS, c0);
     origin->flags |= MRB_FL_CLASS_IS_ORIGIN | MRB_FL_CLASS_IS_INHERITED;
     origin->super = c->super;
     c->super = origin;
@@ -2169,7 +2180,7 @@ mrb_class_new(mrb_state *mrb, struct RClass *super)
 MRB_API struct RClass*
 mrb_module_new(mrb_state *mrb)
 {
-  struct RClass *m = (struct RClass*)mrb_obj_alloc(mrb, MRB_TT_MODULE, mrb->module_class);
+  struct RClass *m = MRB_OBJ_ALLOC(mrb, MRB_TT_MODULE, mrb->module_class);
   boot_initmod(mrb, m);
   return m;
 }
@@ -2208,7 +2219,7 @@ mrb_alias_method(mrb_state *mrb, struct RClass *c, mrb_sym a, mrb_sym b)
     }
     else if (p->color != MRB_GC_RED) {
       struct RClass *tc = MRB_PROC_TARGET_CLASS(p);
-      struct REnv *e = (struct REnv*)mrb_obj_alloc(mrb, MRB_TT_ENV, NULL);
+      struct REnv *e = MRB_OBJ_ALLOC(mrb, MRB_TT_ENV, NULL);
 
       e->mid = b;
       if (tc) {
@@ -2518,7 +2529,7 @@ mrb_mod_define_method_m(mrb_state *mrb, struct RClass *c)
   if (mrb_nil_p(blk)) {
     mrb_raise(mrb, E_ARGUMENT_ERROR, "no block given");
   }
-  p = (struct RProc*)mrb_obj_alloc(mrb, MRB_TT_PROC, mrb->proc_class);
+  p = MRB_OBJ_ALLOC(mrb, MRB_TT_PROC, mrb->proc_class);
   mrb_proc_copy(p, mrb_proc_ptr(blk));
   p->flags |= MRB_PROC_STRICT;
   MRB_METHOD_FROM_PROC(m, p);
@@ -2927,7 +2938,7 @@ mrb_init_class(mrb_state *mrb)
   mrb_undef_method(mrb, cls, "extend_object");
   mrb_undef_method(mrb, cls, "module_function");
 
-  mrb->top_self = (struct RObject*)mrb_obj_alloc(mrb, MRB_TT_OBJECT, mrb->object_class);
+  mrb->top_self = MRB_OBJ_ALLOC(mrb, MRB_TT_OBJECT, mrb->object_class);
   mrb_define_singleton_method(mrb, mrb->top_self, "inspect", inspect_main, MRB_ARGS_NONE());
   mrb_define_singleton_method(mrb, mrb->top_self, "to_s", inspect_main, MRB_ARGS_NONE());
   mrb_define_singleton_method(mrb, mrb->top_self, "define_method", top_define_method, MRB_ARGS_ARG(1,1));

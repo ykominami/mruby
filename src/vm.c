@@ -792,21 +792,11 @@ mrb_value
 mrb_obj_instance_eval(mrb_state *mrb, mrb_value self)
 {
   mrb_value a, b;
-  struct RClass *c;
 
   if (mrb_get_args(mrb, "|S&", &a, &b) == 1) {
     mrb_raise(mrb, E_NOTIMP_ERROR, "instance_eval with string not implemented");
   }
-  switch (mrb_type(self)) {
-  case MRB_TT_MODULE:
-  case MRB_TT_CLASS:
-  case MRB_TT_ICLASS:
-    c = mrb_class_ptr(self);
-    break;
-  default:
-    c = mrb_singleton_class_ptr(mrb, self);
-  }
-  return eval_under(mrb, self, b, c);
+  return eval_under(mrb, self, b, mrb_singleton_class_ptr(mrb, self));
 }
 
 MRB_API mrb_value
@@ -902,7 +892,7 @@ break_new(mrb_state *mrb, uint32_t tag, const struct RProc *p, mrb_value val)
 {
   struct RBreak *brk;
 
-  brk = (struct RBreak*)mrb_obj_alloc(mrb, MRB_TT_BREAK, NULL);
+  brk = MRB_OBJ_ALLOC(mrb, MRB_TT_BREAK, NULL);
   mrb_break_proc_set(brk, p);
   mrb_break_value_set(brk, val);
   mrb_break_tag_set(brk, tag);
@@ -1725,13 +1715,12 @@ RETRY_TRY_BLOCK:
       else if (target_class->tt == MRB_TT_MODULE) {
         target_class = mrb_vm_ci_target_class(ci);
         if (target_class->tt != MRB_TT_ICLASS) {
-          mrb_value exc = mrb_exc_new_lit(mrb, E_RUNTIME_ERROR, "superclass info lost [mruby limitations]");
-          mrb_exc_set(mrb, exc);
-          goto L_RAISE;
+          goto super_typeerror;
         }
       }
       recv = regs[0];
       if (!mrb_obj_is_kind_of(mrb, recv, target_class)) {
+      super_typeerror: ;
         mrb_value exc = mrb_exc_new_lit(mrb, E_TYPE_ERROR,
                                             "self has wrong type to call super in this context");
         mrb_exc_set(mrb, exc);
@@ -2162,7 +2151,7 @@ RETRY_TRY_BLOCK:
             }
             /* check jump destination */
             while (cibase <= ci && ci->proc != dst) {
-              if (ci->acc < 0) { /* jump cross C boudary */
+              if (ci->acc < 0) { /* jump cross C boundary */
                 localjump_error(mrb, LOCALJUMP_ERROR_RETURN);
                 goto L_RAISE;
               }

@@ -37,7 +37,7 @@ static struct RBasic*
 rational_alloc(mrb_state *mrb, struct RClass *c, struct mrb_rational **p)
 {
   struct RRational *s;
-  s = (struct RRational*)mrb_obj_alloc(mrb, MRB_TT_RATIONAL, c);
+  s = MRB_OBJ_ALLOC(mrb, MRB_TT_RATIONAL, c);
 #ifdef RATIONAL_INLINE
   *p = &s->r;
 #else
@@ -728,8 +728,8 @@ void mrb_mruby_rational_gem_init(mrb_state *mrb)
   mrb_define_method(mrb, rat, "quo", rational_div, MRB_ARGS_REQ(1));
   mrb_define_method(mrb, mrb->integer_class, "to_r", fix_to_r, MRB_ARGS_NONE());
 #ifndef MRB_USE_COMPLEX
-  mrb_define_method(mrb, mrb->integer_class, "/", rational_int_div, MRB_ARGS_REQ(1)); /* overrride */
-  mrb_define_method(mrb, mrb->integer_class, "quo", rational_int_quo, MRB_ARGS_REQ(1)); /* overrride */
+  mrb_define_method(mrb, mrb->integer_class, "/", rational_int_div, MRB_ARGS_REQ(1)); /* override */
+  mrb_define_method(mrb, mrb->integer_class, "quo", rational_int_quo, MRB_ARGS_REQ(1)); /* override */
 #endif
   mrb_define_method(mrb, mrb->kernel_module, "Rational", rational_m, MRB_ARGS_ARG(1,1));
 }

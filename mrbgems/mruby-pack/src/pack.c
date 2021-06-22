@@ -30,6 +30,7 @@ enum pack_dir {
   PACK_DIR_QUAD,      /* Q */
   //PACK_DIR_INT,     /* i */
   //PACK_DIR_VAX,
+  PACK_DIR_BER,       /* w */
   PACK_DIR_UTF8,      /* U */
   //PACK_DIR_BER,
   PACK_DIR_DOUBLE,    /* E */
@@ -39,6 +40,8 @@ enum pack_dir {
   PACK_DIR_BASE64,    /* m */
   PACK_DIR_QENC,      /* M */
   PACK_DIR_NUL,       /* x */
+  PACK_DIR_BACK,      /* X */
+  PACK_DIR_ABS,       /* @ */
   PACK_DIR_INVALID
 };
 
@@ -376,6 +379,46 @@ unpack_q(mrb_state *mrb, const unsigned char *src, int srclen, mrb_value ary, un
   return 8;
 }
 
+static int
+pack_w(mrb_state *mrb, mrb_value o, mrb_value str, mrb_int sidx, unsigned int flags)
+{
+  mrb_int n = mrb_integer(o);
+  mrb_int i;
+  char *p;
+
+  if (n < 0) {
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "can't compress negative numbers");
+  }
+  for (i=1; i<sizeof(mrb_int)+1; i++) {
+    mrb_int mask = ~((1L<<(7*i))-1);
+    if ((n & mask) == 0) break;
+  }
+  str = str_len_ensure(mrb, str, sidx + i);
+  p = RSTRING_PTR(str);
+  for (mrb_int j=i; j>0; p++,j--) {
+    mrb_int x = (n>>(7*(j-1)))&0x7f;
+    *p = (char)x;
+    if (j > 1) *p |= 0x80;
+  }
+  return i;
+}
+
+static int
+unpack_w(mrb_state *mrb, const unsigned char *src, int srclen, mrb_value ary, unsigned int flags)
+{
+  mrb_int i, n = 0;
+  const unsigned char *p = src;
+  const unsigned char *e = p + srclen;
+
+  for (i=1; p<e; p++,i++) {
+    n <<= 7;
+    n |= *p & 0x7f;
+    if ((*p & 0x80) == 0) break;
+  }
+  mrb_ary_push(mrb, ary, mrb_int_value(mrb, n));
+  return i;
+}
+
 #ifndef MRB_NO_FLOAT
 static int
 pack_double(mrb_state *mrb, mrb_value o, mrb_value str, mrb_int sidx, unsigned int flags)
@@ -505,7 +548,7 @@ unpack_float(mrb_state *mrb, const unsigned char * src, int srclen, mrb_value ar
 #endif
 
 static int
-pack_utf8(mrb_state *mrb, mrb_value o, mrb_value str, mrb_int sidx, long count, unsigned int flags)
+pack_utf8(mrb_state *mrb, mrb_value o, mrb_value str, mrb_int sidx, int count, unsigned int flags)
 {
   char utf8[4];
   int len = 0;
@@ -622,7 +665,7 @@ unpack_utf8(mrb_state *mrb, const unsigned char * src, int srclen, mrb_value ary
 }
 
 static int
-pack_a(mrb_state *mrb, mrb_value src, mrb_value dst, mrb_int didx, long count, unsigned int flags)
+pack_a(mrb_state *mrb, mrb_value src, mrb_value dst, mrb_int didx, int count, unsigned int flags)
 {
   mrb_int copylen, slen, padlen;
   char *dptr, *dptr0, pad, *sptr;
@@ -660,7 +703,7 @@ pack_a(mrb_state *mrb, mrb_value src, mrb_value dst, mrb_int didx, long count, u
 }
 
 static int
-unpack_a(mrb_state *mrb, const void *src, int slen, mrb_value ary, long count, unsigned int flags)
+unpack_a(mrb_state *mrb, const void *src, int slen, mrb_value ary, int count, unsigned int flags)
 {
   mrb_value dst;
   const char *cp, *sptr;
@@ -694,7 +737,7 @@ unpack_a(mrb_state *mrb, const void *src, int slen, mrb_value ary, long count, u
 
 
 static int
-pack_h(mrb_state *mrb, mrb_value src, mrb_value dst, mrb_int didx, long count, unsigned int flags)
+pack_h(mrb_state *mrb, mrb_value src, mrb_value dst, mrb_int didx, int count, unsigned int flags)
 {
   unsigned int a, ashift, b, bshift;
   long slen;
@@ -786,9 +829,8 @@ unpack_h(mrb_state *mrb, const void *src, int slen, mrb_value ary, int count, un
   return (int)(sptr - sptr0);
 }
 
-
 static int
-pack_m(mrb_state *mrb, mrb_value src, mrb_value dst, mrb_int didx, long count, unsigned int flags)
+pack_m(mrb_state *mrb, mrb_value src, mrb_value dst, mrb_int didx, int count)
 {
   mrb_int dstlen;
   unsigned long l;
@@ -854,7 +896,7 @@ pack_m(mrb_state *mrb, mrb_value src, mrb_value dst, mrb_int didx, long count, u
 }
 
 static int
-unpack_m(mrb_state *mrb, const void *src, int slen, mrb_value ary, unsigned int flags)
+unpack_m(mrb_state *mrb, const void *src, int slen, mrb_value ary)
 {
   mrb_value dst;
   int dlen;
@@ -910,7 +952,7 @@ done:
 }
 
 static int
-pack_M(mrb_state *mrb, mrb_value src, mrb_value dst, mrb_int didx, long count, unsigned int flags)
+pack_M(mrb_state *mrb, mrb_value src, mrb_value dst, mrb_int didx, int count)
 {
   static const char hex_table[] = "0123456789ABCDEF";
   char buff[1024];
@@ -971,7 +1013,7 @@ pack_M(mrb_state *mrb, mrb_value src, mrb_value dst, mrb_int didx, long count, u
 }
 
 static int
-unpack_M(mrb_state *mrb, const void *src, int slen, mrb_value ary, unsigned int flags)
+unpack_M(mrb_state *mrb, const void *src, int slen, mrb_value ary)
 {
   mrb_value buf = mrb_str_new(mrb, 0, slen);
   const char *s = (const char*)src, *ss = s;
@@ -1004,11 +1046,10 @@ unpack_M(mrb_state *mrb, const void *src, int slen, mrb_value ary, unsigned int 
 }
 
 static int
-pack_x(mrb_state *mrb, mrb_value src, mrb_value dst, mrb_int didx, long count, unsigned int flags)
+pack_x(mrb_state *mrb, mrb_value dst, mrb_int didx, int count)
 {
   long i;
 
-  if (count < 0) return 0;
   dst = str_len_ensure(mrb, dst, didx + count);
   for (i = 0; i < count; i++) {
     RSTRING_PTR(dst)[didx + i] = '\0';
@@ -1016,14 +1057,12 @@ pack_x(mrb_state *mrb, mrb_value src, mrb_value dst, mrb_int didx, long count, u
   return count;
 }
 
-static int
-unpack_x(mrb_state *mrb, const void *src, int slen, mrb_value ary, int count, unsigned int flags)
+static void
+check_x(mrb_state *mrb, int a, int count, char c)
 {
-  if (count < 0) return slen;
-  if (slen < count) {
-    mrb_raise(mrb, E_ARGUMENT_ERROR, "x outside of string");
+  if (a < count) {
+    mrb_raisef(mrb, E_ARGUMENT_ERROR, "%c outside of string", c);
   }
-  return count;
 }
 
 static void
@@ -1152,6 +1191,11 @@ alias:
     size = 4;
     flags |= PACK_FLAG_SIGNED;
     break;
+  case 'w':
+    dir = PACK_DIR_BER;
+    type = PACK_TYPE_INTEGER;
+    flags |= PACK_FLAG_SIGNED;
+    break;
   case 'm':
     dir = PACK_DIR_BASE64;
     type = PACK_TYPE_STRING;
@@ -1216,14 +1260,21 @@ alias:
     dir = PACK_DIR_NUL;
     type = PACK_TYPE_NONE;
     break;
+  case 'X':
+    dir = PACK_DIR_BACK;
+    type = PACK_TYPE_NONE;
+    break;
+  case '@':
+    dir = PACK_DIR_ABS;
+    type = PACK_TYPE_NONE;
+    break;
   case 'Z':
     dir = PACK_DIR_STR;
     type = PACK_TYPE_STRING;
     flags |= PACK_FLAG_WIDTH | PACK_FLAG_COUNT2 | PACK_FLAG_Z;
     break;
   case 'p': case 'P':
-  case 'X':
-  case '%': case '@':
+  case '%':
     mrb_raisef(mrb, E_ARGUMENT_ERROR, "%c is not supported", (char)t);
     break;
   default:
@@ -1234,19 +1285,21 @@ alias:
 
   /* read suffix [0-9*_!<>] */
   while (tmpl->idx < tlen) {
-    ch = tptr[tmpl->idx++];
+    ch = tptr[tmpl->idx];
     if (ISDIGIT(ch)) {
-      count = ch - '0';
-      while (tmpl->idx < tlen && ISDIGIT(tptr[tmpl->idx])) {
-        if (count+10 > INT_MAX/10) {
-          mrb_raise(mrb, E_RUNTIME_ERROR, "too big template length");
-        }
-        ch = tptr[tmpl->idx++] - '0';
-        count = count * 10 + ch;
+      char *e;
+      mrb_int n = mrb_int_read(tptr+tmpl->idx, tptr+tlen, &e);
+      if (e == NULL || n > INT_MAX) {
+        mrb_raise(mrb, E_RUNTIME_ERROR, "too big template length");
       }
-      continue;  /* special case */
+      count = (int)n;
+      tmpl->idx = e - tptr;
+      continue;
     } else if (ch == '*')  {
-      count = -1;
+      if (type == PACK_TYPE_NONE)
+        count = 0;
+      else
+        count = -1;
     } else if (ch == '_' || ch == '!' || ch == '<' || ch == '>') {
       if (strchr("sSiIlLqQ", (int)t) == NULL) {
         mrb_raisef(mrb, E_ARGUMENT_ERROR, "'%c' allowed only after types sSiIlLqQ", ch);
@@ -1258,10 +1311,11 @@ alias:
       } else if (ch == '>') {
         flags |= PACK_FLAG_GT;
       }
-    } else {
-      tmpl->idx--;
+    }
+    else {
       break;
     }
+    tmpl->idx++;
   }
 
   if ((flags & PACK_FLAG_LT) || (!(flags & PACK_FLAG_GT) && littleendian)) {
@@ -1298,8 +1352,22 @@ mrb_pack_pack(mrb_state *mrb, mrb_value ary)
     if (dir == PACK_DIR_INVALID)
       continue;
     else if (dir == PACK_DIR_NUL) {
-      if (count > 0 && ridx > INT_MAX - count) goto overflow;
-      ridx += pack_x(mrb, mrb_nil_value(), result, ridx, count, flags);
+    grow:
+      if (ridx > INT_MAX - count) goto overflow;
+      ridx += pack_x(mrb, result, ridx, count);
+      continue;
+    }
+    else if (dir == PACK_DIR_BACK) {
+      check_x(mrb, ridx, count, 'X');
+      ridx -= count;
+      continue;
+    }
+    else if (dir == PACK_DIR_ABS) {
+      count -= ridx;
+      if (count > 0) goto grow;
+      count = -count;
+      check_x(mrb, ridx, count, '@');
+      ridx -= count;
       continue;
     }
 
@@ -1341,11 +1409,14 @@ mrb_pack_pack(mrb_state *mrb, mrb_value ary)
       case PACK_DIR_QUAD:
         ridx += pack_q(mrb, o, result, ridx, flags);
         break;
+      case PACK_DIR_BER:
+        ridx += pack_w(mrb, o, result, ridx, flags);
+        break;
       case PACK_DIR_BASE64:
-        ridx += pack_m(mrb, o, result, ridx, count, flags);
+        ridx += pack_m(mrb, o, result, ridx, count);
         break;
       case PACK_DIR_QENC:
-        ridx += pack_M(mrb, o, result, ridx, count, flags);
+        ridx += pack_M(mrb, o, result, ridx, count);
         break;
       case PACK_DIR_HEX:
         ridx += pack_h(mrb, o, result, ridx, count, flags);
@@ -1411,7 +1482,18 @@ pack_unpack(mrb_state *mrb, mrb_value str, int single)
     if (dir == PACK_DIR_INVALID)
       continue;
     else if (dir == PACK_DIR_NUL) {
-      srcidx += unpack_x(mrb, sptr, srclen - srcidx, result, count, flags);
+      check_x(mrb, srclen-srcidx, count, 'x');
+      srcidx += count;
+      continue;
+    }
+    else if (dir == PACK_DIR_BACK) {
+      check_x(mrb, srcidx, count, 'X');
+      srcidx -= count;
+      continue;
+    }
+    else if (dir == PACK_DIR_ABS) {
+      check_x(mrb, srclen, count, '@');
+      srcidx = count;
       continue;
     }
 
@@ -1425,10 +1507,10 @@ pack_unpack(mrb_state *mrb, mrb_value str, int single)
         srcidx += unpack_a(mrb, sptr, srclen - srcidx, result, count, flags);
         break;
       case PACK_DIR_BASE64:
-        srcidx += unpack_m(mrb, sptr, srclen - srcidx, result, flags);
+        srcidx += unpack_m(mrb, sptr, srclen - srcidx, result);
         break;
       case PACK_DIR_QENC:
-        srcidx += unpack_M(mrb, sptr, srclen - srcidx, result, flags);
+        srcidx += unpack_M(mrb, sptr, srclen - srcidx, result);
         break;
       default:
         break;
@@ -1457,6 +1539,9 @@ pack_unpack(mrb_state *mrb, mrb_value str, int single)
         break;
       case PACK_DIR_QUAD:
         srcidx += unpack_q(mrb, sptr, srclen - srcidx, result, flags);
+        break;
+      case PACK_DIR_BER:
+        srcidx += unpack_w(mrb, sptr, srclen - srcidx, result, flags);
         break;
 #ifndef MRB_NO_FLOAT
       case PACK_DIR_FLOAT:
