@@ -362,6 +362,12 @@ read_debug_record(mrb_state *mrb, const uint8_t *start, mrb_irep* irep, size_t *
         }
       } break;
 
+      case mrb_debug_line_packed_map: {
+        file->lines.packed_map = (uint8_t*)mrb_calloc(mrb, 1, (size_t)file->line_entry_count);
+        memcpy(file->lines.packed_map, bin, file->line_entry_count);
+        bin += file->line_entry_count;
+      } break;
+
       default: return MRB_DUMP_GENERAL_FAILURE;
     }
   }
@@ -677,7 +683,7 @@ mrb_load_irep_buf(mrb_state *mrb, const void *buf, size_t bufsize)
 MRB_API mrb_value
 mrb_load_proc(mrb_state *mrb, const struct RProc *proc)
 {
-  return mrb_vm_run(mrb, proc, mrb_top_self(mrb), 0);
+  return mrb_top_run(mrb, proc, mrb_top_self(mrb), 0);
 }
 
 #ifndef MRB_NO_STDIO

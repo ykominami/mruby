@@ -344,8 +344,6 @@ class String
   end
 
   def codepoints(&block)
-    len = self.size
-
     if block_given?
       self.split('').each do|x|
         block.call(x.ord)
@@ -459,6 +457,8 @@ class String
       break if exclusive and n == 0
       yield bs
       break if n == 0
+      bsiz = bs.size
+      break if bsiz > max.size || bsiz == 0
       bs = bs.succ
     end
     self
