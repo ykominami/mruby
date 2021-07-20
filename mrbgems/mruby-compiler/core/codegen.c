@@ -398,17 +398,15 @@ gen_jmpdst(codegen_scope *s, uint32_t pc)
 {
 
   if (pc == JMPLINK_START) {
-    gen_S(s, 0);
+    pc = 0;
   }
-  else {
-    uint32_t pos2 = s->pc+2;
-    int32_t off = pc - pos2;
+  uint32_t pos2 = s->pc+2;
+  int32_t off = pc - pos2;
 
-    if (off > INT16_MAX || INT16_MIN > off) {
-      codegen_error(s, "too big jump offset");
-    }
-    gen_S(s, (uint16_t)off);
+  if (off > INT16_MAX || INT16_MIN > off) {
+    codegen_error(s, "too big jump offset");
   }
+  gen_S(s, (uint16_t)off);
 }
 
 static uint32_t
@@ -490,10 +488,59 @@ gen_move(codegen_scope *s, uint16_t dst, uint16_t src, int nopeep)
       s->pc = s->lastpc;
       genop_2(s, data.insn, dst, data.b);
       break;
+    case OP_GETUPVAR:
+      if (nopeep || data.a != src || data.a < s->nlocals) goto normal;
+      s->pc = s->lastpc;
+      genop_3(s, data.insn, dst, data.b, data.c);
+      break;
     default:
       goto normal;
     }
   }
+}
+
+static int search_upvar(codegen_scope *s, mrb_sym id, int *idx);
+
+static void
+gen_getupvar(codegen_scope *s, uint16_t dst, mrb_sym id)
+{
+  int idx;
+  int lv = search_upvar(s, id, &idx);
+
+  struct mrb_insn_data data = mrb_last_insn(s);
+  if (!no_peephole(s) && data.insn == OP_SETUPVAR && data.a == dst && data.b == idx && data.c == lv) {
+    /* skip GETUPVAR right after SETUPVAR */
+    return;
+  }
+  genop_3(s, OP_GETUPVAR, dst, idx, lv);
+}
+
+static void
+gen_setupvar(codegen_scope *s, uint16_t dst, mrb_sym id)
+{
+  int idx;
+  int lv = search_upvar(s, id, &idx);
+
+  struct mrb_insn_data data = mrb_last_insn(s);
+  if (!no_peephole(s) && data.insn == OP_MOVE && data.a == dst) {
+    dst = data.b;
+    s->pc = s->lastpc;
+  }
+  genop_3(s, OP_SETUPVAR, dst, idx, lv);
+}
+
+static int new_sym(codegen_scope *s, mrb_sym sym);
+
+static void
+gen_setxv(codegen_scope *s, uint8_t op, uint16_t dst, mrb_sym sym)
+{
+  int idx = new_sym(s, sym);
+  struct mrb_insn_data data = mrb_last_insn(s);
+  if (!no_peephole(s) && data.insn == OP_MOVE && data.a == dst) {
+    dst = data.b;
+    s->pc = s->lastpc;
+  }
+  genop_2(s, op, dst, idx);
 }
 
 static void
@@ -537,14 +584,14 @@ gen_addsub(codegen_scope *s, uint8_t op, uint16_t dst)
       data.b = data.insn - OP_LOADI_0;
       /* fall through */
     case OP_LOADI:
+    case OP_LOADI16:
     replace:
-      if (data.b >= 128) goto normal;
       s->pc = s->lastpc;
       if (op == OP_ADD) {
-        genop_2(s, OP_ADDI, dst, (uint8_t)data.b);
+        genop_2(s, OP_ADDI, dst, data.b);
       }
       else {
-        genop_2(s, OP_SUBI, dst, (uint8_t)data.b);
+        genop_2(s, OP_SUBI, dst, data.b);
       }
       break;
     default:
@@ -968,8 +1015,7 @@ lambda_body(codegen_scope *s, node *tree, int blk)
         gen_move(s, idx, cursp(), 0);
       }
       else {
-        int lv = search_upvar(s, id, &idx);
-        genop_3(s, OP_GETUPVAR, cursp(), idx, lv);
+        gen_getupvar(s, cursp(), id);
       }
       i++;
       opt = opt->cdr;
@@ -1007,8 +1053,7 @@ lambda_body(codegen_scope *s, node *tree, int blk)
             gen_move(s, idx, cursp(), 0);
           }
           else {
-            int lv = search_upvar(s, kwd_sym, &idx);
-            genop_3(s, OP_GETUPVAR, cursp(), idx, lv);
+            gen_getupvar(s, cursp(), kwd_sym);
           }
           jmp_def_set = genjmp_0(s, OP_JMP);
           dispatch(s, jmpif_key_p);
@@ -1281,8 +1326,7 @@ gen_assignment(codegen_scope *s, node *tree, int sp, int val)
   tree = tree->cdr;
   switch (type) {
   case NODE_GVAR:
-    idx = new_sym(s, nsym(tree));
-    genop_2(s, OP_SETGV, sp, idx);
+    gen_setxv(s, OP_SETGV, sp, nsym(tree));
     break;
   case NODE_ARG:
   case NODE_LVAR:
@@ -1294,8 +1338,7 @@ gen_assignment(codegen_scope *s, node *tree, int sp, int val)
       break;
     }
     else {                      /* upvar */
-      int lv = search_upvar(s, nsym(tree), &idx);
-      genop_3(s, OP_SETUPVAR, sp, idx, lv);
+      gen_setupvar(s, sp, nsym(tree));
     }
     break;
   case NODE_NVAR:
@@ -1303,16 +1346,13 @@ gen_assignment(codegen_scope *s, node *tree, int sp, int val)
     codegen_error(s, "Can't assign to numbered parameter");
     break;
   case NODE_IVAR:
-    idx = new_sym(s, nsym(tree));
-    genop_2(s, OP_SETIV, sp, idx);
+    gen_setxv(s, OP_SETIV, sp, nsym(tree));
     break;
   case NODE_CVAR:
-    idx = new_sym(s, nsym(tree));
-    genop_2(s, OP_SETCV, sp, idx);
+    gen_setxv(s, OP_SETCV, sp, nsym(tree));
     break;
   case NODE_CONST:
-    idx = new_sym(s, nsym(tree));
-    genop_2(s, OP_SETCONST, sp, idx);
+    gen_setxv(s, OP_SETCONST, sp, nsym(tree));
     break;
   case NODE_COLON2:
     gen_move(s, cursp(), sp, 0);
@@ -2463,8 +2503,7 @@ codegen(codegen_scope *s, node *tree, int val)
         gen_move(s, cursp(), idx, val);
       }
       else {
-        int lv = search_upvar(s, nsym(tree), &idx);
-        genop_3(s, OP_GETUPVAR, cursp(), idx, lv);
+        gen_getupvar(s, cursp(), nsym(tree));
       }
       push();
     }
@@ -2623,6 +2662,9 @@ codegen(codegen_scope *s, node *tree, int val)
           if (overflow) {
             int off = new_litbn(s, p, base, TRUE);
             genop_2(s, OP_LOADL, cursp(), off);
+          }
+          else if (i == 0) {
+            genop_1(s, OP_LOADI_0, cursp());
           }
           else {
             i = -i;
