@@ -4,11 +4,6 @@
 ** See Copyright Notice in mruby.h
 */
 
-#include <stddef.h>
-#include <stdarg.h>
-#ifndef MRB_NO_FLOAT
-#include <math.h>
-#endif
 #include <mruby.h>
 #include <mruby/array.h>
 #include <mruby/class.h>
@@ -25,6 +20,9 @@
 #include <mruby/throw.h>
 #include <mruby/dump.h>
 #include <mruby/presym.h>
+#ifndef MRB_NO_FLOAT
+#include <math.h>
+#endif
 
 #ifdef MRB_NO_STDIO
 #if defined(__cplusplus)
@@ -314,7 +312,7 @@ mrb_protect_error(mrb_state *mrb, mrb_protect_error_func *body, void *userdata, 
   mrb_value result = mrb_nil_value();
   int ai = mrb_gc_arena_save(mrb);
   const struct mrb_context *c = mrb->c;
-  int ci_index = c->ci - c->cibase;
+  ptrdiff_t ci_index = c->ci - c->cibase;
 
   if (error) { *error = FALSE; }
 

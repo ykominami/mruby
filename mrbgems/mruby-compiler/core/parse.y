@@ -13,7 +13,6 @@
 
 #include <ctype.h>
 #include <errno.h>
-#include <stdlib.h>
 #include <string.h>
 #include <mruby.h>
 #include <mruby/compile.h>
@@ -34,7 +33,6 @@ typedef struct mrb_parser_heredoc_info parser_heredoc_info;
 static int yyparse(parser_state *p);
 static int yylex(void *lval, parser_state *p);
 static void yyerror(parser_state *p, const char *s);
-static void yywarn(parser_state *p, const char *s);
 static void yywarning(parser_state *p, const char *s);
 static void backref_error(parser_state *p, node *n);
 static void void_expr_error(parser_state *p, node *n);
@@ -1624,7 +1622,7 @@ bodystmt        : compstmt
                         NODE_LINENO($$, $1);
                       }
                       else if ($3) {
-                        yywarn(p, "else without rescue is useless");
+                        yywarning(p, "else without rescue is useless");
                         $$ = push($1, $3);
                       }
                       else {
@@ -4126,7 +4124,7 @@ yyerror_c(parser_state *p, const char *msg, char c)
 }
 
 static void
-yywarn(parser_state *p, const char *s)
+yywarning(parser_state *p, const char *s)
 {
   char* c;
   size_t n;
@@ -4151,12 +4149,6 @@ yywarn(parser_state *p, const char *s)
     p->warn_buffer[p->nwarn].column = p->column;
   }
   p->nwarn++;
-}
-
-static void
-yywarning(parser_state *p, const char *s)
-{
-  yywarn(p, s);
 }
 
 static void
@@ -6264,10 +6256,10 @@ parser_yylex(parser_state *p)
       if (last_state == EXPR_FNAME) goto gvar;
       tokfix(p);
       {
-        unsigned long n = strtoul(tok(p), NULL, 10);
-        if (n > INT_MAX) {
-          yyerror(p, "capture group index must be <= " MRB_STRINGIZE(INT_MAX));
-          return 0;
+        mrb_int n = mrb_int_read(tok(p), NULL, NULL);
+        if (n > INT32_MAX) {
+          yywarning(p, "capture group index too big; always nil");
+          return keyword_nil;
         }
         pylval.nd = new_nth_ref(p, (int)n);
       }
@@ -7770,7 +7762,7 @@ mrb_parser_foreach_top_variable(mrb_state *mrb, struct mrb_parser_state *p, mrb_
   if ((intptr_t)n->car == NODE_SCOPE) {
     n = n->cdr->car;
     for (; n; n = n->cdr) {
-      mrb_sym sym = (intptr_t)n->car;
+      mrb_sym sym = sym(n->car);
       if (sym && !func(mrb, sym, user)) break;
     }
   }
