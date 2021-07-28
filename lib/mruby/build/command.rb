@@ -370,8 +370,7 @@ module MRuby
       opt = @compile_options % {funcname: funcname}
       opt << " -S" if cdump
       opt << " -s" if static
-      cmd = %["#{filename @command}" #{opt} #{filename(infiles).map{|f| %["#{f}"]}.join(' ')}]
-      cmd = %Q["#{filename @command}" #{cdump ? "-S" : ""} #{@compile_options % {:funcname => funcname}} #{path(infiles).map{|f| %Q["#{f}"]}.join(' ')}]
+      cmd = %["#{filename @command}" #{opt} #{path(infiles).map{|f| %["#{f}"]}.join(' ')}]
       puts cmd if Rake.verbose
       IO.popen(cmd, 'r+') do |io|
         out.puts io.read
