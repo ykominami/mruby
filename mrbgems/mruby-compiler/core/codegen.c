@@ -39,7 +39,9 @@ enum looptype {
 
 struct loopinfo {
   enum looptype type;
-  uint32_t pc0, pc1, pc2, pc3;
+  uint32_t pc0;                 /* `next` destination */
+  uint32_t pc1;                 /* `redo` destination */
+  uint32_t pc2;                 /* `break` destination */
   int acc;
   struct loopinfo *prev;
 };
@@ -1003,7 +1005,7 @@ for_body(codegen_scope *s, node *tree)
   }
   /* construct loop */
   lp = loop_push(s, LOOP_FOR);
-  lp->pc2 = new_label(s);
+  lp->pc1 = new_label(s);
 
   /* loop body */
   codegen(s, tree->cdr->cdr->car, VAL);
@@ -1039,7 +1041,7 @@ lambda_body(codegen_scope *s, node *tree, int blk)
   else {
     mrb_aspec a;
     int ma, oa, ra, pa, ka, kd, ba;
-    int pos, i;
+    uint32_t pos, i;
     node *opt;
     node *margs, *pargs;
     node *tail;
@@ -1831,7 +1833,8 @@ codegen(codegen_scope *s, node *tree, int val)
 
   case NODE_IF:
     {
-      int pos1, pos2, nil_p = FALSE;
+      uint32_t pos1, pos2;
+      mrb_bool nil_p = FALSE;
       node *elsepart = tree->cdr->cdr->car;
 
       if (!tree->car) {
@@ -1906,7 +1909,7 @@ codegen(codegen_scope *s, node *tree, int val)
 
   case NODE_AND:
     {
-      int pos;
+      uint32_t pos;
 
       codegen(s, tree->car, VAL);
       pop();
@@ -1918,7 +1921,7 @@ codegen(codegen_scope *s, node *tree, int val)
 
   case NODE_OR:
     {
-      int pos;
+      uint32_t pos;
 
       codegen(s, tree->car, VAL);
       pop();
@@ -1931,16 +1934,17 @@ codegen(codegen_scope *s, node *tree, int val)
   case NODE_WHILE:
     {
       struct loopinfo *lp = loop_push(s, LOOP_NORMAL);
+      uint32_t pos;
 
+      if (!val) lp->acc = -1;
       lp->pc0 = new_label(s);
-      lp->pc1 = genjmp_0(s, OP_JMP);
-      lp->pc2 = new_label(s);
-      codegen(s, tree->cdr, NOVAL);
-      dispatch(s, lp->pc1);
       codegen(s, tree->car, VAL);
       pop();
-      genjmp2(s, OP_JMPIF, cursp(), lp->pc2, NOVAL);
-
+      pos = genjmp2_0(s, OP_JMPNOT, cursp(), NOVAL);
+      lp->pc1 = new_label(s);
+      codegen(s, tree->cdr, NOVAL);
+      genjmp(s, OP_JMP, lp->pc0);
+      dispatch(s, pos);
       loop_pop(s, val);
     }
     break;
@@ -1948,16 +1952,17 @@ codegen(codegen_scope *s, node *tree, int val)
   case NODE_UNTIL:
     {
       struct loopinfo *lp = loop_push(s, LOOP_NORMAL);
+      uint32_t pos;
 
+      if (!val) lp->acc = -1;
       lp->pc0 = new_label(s);
-      lp->pc1 = genjmp_0(s, OP_JMP);
-      lp->pc2 = new_label(s);
-      codegen(s, tree->cdr, NOVAL);
-      dispatch(s, lp->pc1);
       codegen(s, tree->car, VAL);
       pop();
-      genjmp2(s, OP_JMPNOT, cursp(), lp->pc2, NOVAL);
-
+      pos = genjmp2_0(s, OP_JMPIF, cursp(), NOVAL);
+      lp->pc1 = new_label(s);
+      codegen(s, tree->cdr, NOVAL);
+      genjmp(s, OP_JMP, lp->pc0);
+      dispatch(s, pos);
       loop_pop(s, val);
     }
     break;
@@ -2323,7 +2328,7 @@ codegen(codegen_scope *s, node *tree, int val)
       if (len == 2 &&
           ((name[0] == '|' && name[1] == '|') ||
            (name[0] == '&' && name[1] == '&'))) {
-        int pos;
+        uint32_t pos;
 
         pop();
         if (val) {
@@ -2558,7 +2563,7 @@ codegen(codegen_scope *s, node *tree, int val)
       raise_error(s, "unexpected redo");
     }
     else {
-      genjmp(s, OP_JMPUW, s->loop->pc2);
+      genjmp(s, OP_JMPUW, s->loop->pc1);
     }
     if (val) push();
     break;
@@ -3320,7 +3325,7 @@ loop_push(codegen_scope *s, enum looptype t)
   struct loopinfo *p = (struct loopinfo *)codegen_palloc(s, sizeof(struct loopinfo));
 
   p->type = t;
-  p->pc0 = p->pc1 = p->pc2 = p->pc3 = JMPLINK_START;
+  p->pc0 = p->pc1 = p->pc2 = JMPLINK_START;
   p->prev = s->loop;
   p->acc = cursp();
   s->loop = p;
@@ -3338,11 +3343,16 @@ loop_break(codegen_scope *s, node *tree)
   else {
     struct loopinfo *loop;
 
-    if (tree) {
-      gen_retval(s, tree);
-    }
 
     loop = s->loop;
+    if (tree) {
+      if (loop->acc < 0) {
+        codegen(s, tree, NOVAL);
+      }
+      else {
+        gen_retval(s, tree);
+      }
+    }
     while (loop) {
       if (loop->type == LOOP_BEGIN) {
         loop = loop->prev;
@@ -3362,11 +3372,16 @@ loop_break(codegen_scope *s, node *tree)
     if (loop->type == LOOP_NORMAL) {
       int tmp;
 
-      if (tree) {
-        gen_move(s, loop->acc, cursp(), 0);
+      if (loop->acc >= 0) {
+        if (tree) {
+          gen_move(s, loop->acc, cursp(), 0);
+        }
+        else {
+          genop_1(s, OP_LOADNIL, loop->acc);
+        }
       }
-      tmp = genjmp(s, OP_JMPUW, loop->pc3);
-      loop->pc3 = tmp;
+      tmp = genjmp(s, OP_JMPUW, loop->pc2);
+      loop->pc2 = tmp;
     }
     else {
       if (!tree) {
@@ -3383,7 +3398,7 @@ loop_pop(codegen_scope *s, int val)
   if (val) {
     genop_1(s, OP_LOADNIL, cursp());
   }
-  dispatch_linked(s, s->loop->pc3);
+  dispatch_linked(s, s->loop->pc2);
   s->loop = s->loop->prev;
   if (val) push();
 }
