@@ -180,7 +180,7 @@ int_idiv(mrb_state *mrb, mrb_value x)
   if (y == 0) {
     int_zerodiv(mrb);
   }
-  return mrb_fixnum_value(mrb_integer(x) / y);
+  return mrb_int_value(mrb, mrb_integer(x) / y);
 }
 
 static mrb_value
@@ -1064,7 +1064,7 @@ mrb_num_mul(mrb_state *mrb, mrb_value x, mrb_value y)
 /* 15.2.8.3.3  */
 /*
  * call-seq:
- *   fix * numeric  ->  numeric_result
+ *   int * numeric  ->  numeric_result
  *
  * Performs multiplication: the class of the resulting object depends on
  * the class of <code>numeric</code> and on the magnitude of the
@@ -1080,7 +1080,7 @@ int_mul(mrb_state *mrb, mrb_value x)
 }
 
 static void
-fixdivmod(mrb_state *mrb, mrb_int x, mrb_int y, mrb_int *divp, mrb_int *modp)
+intdivmod(mrb_state *mrb, mrb_int x, mrb_int y, mrb_int *divp, mrb_int *modp)
 {
   if (y == 0) {
     int_zerodiv(mrb);
@@ -1104,10 +1104,9 @@ fixdivmod(mrb_state *mrb, mrb_int x, mrb_int y, mrb_int *divp, mrb_int *modp)
 /* 15.2.8.3.5  */
 /*
  *  call-seq:
- *    fix % other        ->  real
- *    fix.modulo(other)  ->  real
+ *    int % other        ->  real
  *
- *  Returns <code>fix</code> modulo <code>other</code>.
+ *  Returns <code>int</code> modulo <code>other</code>.
  *  See <code>numeric.divmod</code> for more information.
  */
 
@@ -1118,27 +1117,29 @@ int_mod(mrb_state *mrb, mrb_value x)
   mrb_int a, b;
 
   a = mrb_integer(x);
-  if (mrb_integer_p(y) && a != MRB_INT_MIN && (b=mrb_integer(y)) != MRB_INT_MIN) {
-    mrb_int mod;
-
-    fixdivmod(mrb, a, b, NULL, &mod);
-    return mrb_fixnum_value(mod);
+  if (mrb_integer_p(y)) {
+    b = mrb_integer(y);
+    if (b == 0) int_zerodiv(mrb);
+    if (a == MRB_INT_MIN && b == -1) return mrb_fixnum_value(0);
+    mrb_int mod = a % b;
+    if ((a < 0) != (b < 0) && mod != 0) {
+      mod += b;
+    }
+    return mrb_int_value(mrb, mod);
   }
 #ifdef MRB_NO_FLOAT
   mrb_raise(mrb, E_TYPE_ERROR, "non integer modulo");
 #else
-  else {
-    mrb_float mod;
+  mrb_float mod;
 
-    flodivmod(mrb, (mrb_float)a, mrb_as_float(mrb, y), NULL, &mod);
-    return mrb_float_value(mrb, mod);
-  }
+  flodivmod(mrb, (mrb_float)a, mrb_as_float(mrb, y), NULL, &mod);
+  return mrb_float_value(mrb, mod);
 #endif
 }
 
 /*
  *  call-seq:
- *     fix.divmod(numeric)  ->  array
+ *     int.divmod(numeric)  ->  array
  *
  *  See <code>Numeric#divmod</code>.
  */
@@ -1150,7 +1151,7 @@ int_divmod(mrb_state *mrb, mrb_value x)
   if (mrb_integer_p(y)) {
     mrb_int div, mod;
 
-    fixdivmod(mrb, mrb_integer(x), mrb_integer(y), &div, &mod);
+    intdivmod(mrb, mrb_integer(x), mrb_integer(y), &div, &mod);
     return mrb_assoc_new(mrb, mrb_int_value(mrb, div), mrb_int_value(mrb, mod));
   }
 #ifdef MRB_NO_FLOAT
@@ -1189,9 +1190,9 @@ flo_divmod(mrb_state *mrb, mrb_value x)
 /* 15.2.8.3.7  */
 /*
  * call-seq:
- *   fix == other  ->  true or false
+ *   int == other  ->  true or false
  *
- * Return <code>true</code> if <code>fix</code> equals <code>other</code>
+ * Return <code>true</code> if <code>int</code> equals <code>other</code>
  * numerically.
  *
  *   1 == 2      #=> false
@@ -1226,7 +1227,7 @@ int_equal(mrb_state *mrb, mrb_value x)
 /* 15.2.8.3.8  */
 /*
  * call-seq:
- *   ~fix  ->  integer
+ *   ~int  ->  integer
  *
  * One's complement: returns a number where each bit is flipped.
  *   ex.0---00001 (1)-> 1---11110 (-2)
@@ -1259,7 +1260,7 @@ static mrb_value flo_xor(mrb_state *mrb, mrb_value x);
 /* 15.2.8.3.9  */
 /*
  * call-seq:
- *   fix & integer  ->  integer_result
+ *   int & integer  ->  integer_result
  *
  * Bitwise AND.
  */
@@ -1275,7 +1276,7 @@ int_and(mrb_state *mrb, mrb_value x)
 /* 15.2.8.3.10 */
 /*
  * call-seq:
- *   fix | integer  ->  integer_result
+ *   int | integer  ->  integer_result
  *
  * Bitwise OR.
  */
@@ -1291,7 +1292,7 @@ int_or(mrb_state *mrb, mrb_value x)
 /* 15.2.8.3.11 */
 /*
  * call-seq:
- *   fix ^ integer  ->  integer_result
+ *   int ^ integer  ->  integer_result
  *
  * Bitwise EXCLUSIVE OR.
  */
@@ -1306,45 +1307,48 @@ int_xor(mrb_state *mrb, mrb_value x)
 
 #define NUMERIC_SHIFT_WIDTH_MAX (MRB_INT_BIT-1)
 
-static mrb_value
-lshift(mrb_state *mrb, mrb_int val, mrb_int width)
+mrb_bool
+mrb_num_shift(mrb_state *mrb, mrb_int val, mrb_int width, mrb_int *num)
 {
-  mrb_assert(width >= 0);
-  if (val > 0) {
+  if (width < 0) {              /* rshift */
+    if (width == MRB_INT_MIN || -width >= NUMERIC_SHIFT_WIDTH_MAX) {
+      if (val < 0) {
+        *num = -1;
+      }
+      else {
+        *num = 0;
+      }
+    }
+    else {
+      *num = val >> -width;
+    }
+  }
+  else if (val > 0) {
     if ((width > NUMERIC_SHIFT_WIDTH_MAX) ||
         (val   > (MRB_INT_MAX >> width))) {
-      int_overflow(mrb, "bit shift");
+      return FALSE;
     }
-    return mrb_int_value(mrb, val << width);
+    *num = val << width;
   }
   else {
     if ((width > NUMERIC_SHIFT_WIDTH_MAX) ||
-        (val   <= (MRB_INT_MIN >> width))) {
-      int_overflow(mrb, "bit shift");
+        (val   < (MRB_INT_MIN >> width))) {
+      return FALSE;
     }
-    return mrb_int_value(mrb, (val * ((mrb_int)1 << width)));
+    if (width == NUMERIC_SHIFT_WIDTH_MAX)
+      *num = MRB_INT_MIN;
+    else
+      *num = val * ((mrb_int)1 << width);
   }
-}
-
-static mrb_value
-rshift(mrb_state *mrb, mrb_int val, mrb_int width)
-{
-  mrb_assert(width >= 0);
-  if (width >= NUMERIC_SHIFT_WIDTH_MAX) {
-    if (val < 0) {
-      return mrb_fixnum_value(-1);
-    }
-    return mrb_fixnum_value(0);
-  }
-  return mrb_int_value(mrb, val >> width);
+  return TRUE;
 }
 
 /* 15.2.8.3.12 */
 /*
  * call-seq:
- *   fix << count  ->  integer or float
+ *   int << count  ->  integer or float
  *
- * Shifts _fix_ left _count_ positions (right if _count_ is negative).
+ * Shifts _int_ left _count_ positions (right if _count_ is negative).
  */
 
 static mrb_value
@@ -1358,19 +1362,18 @@ int_lshift(mrb_state *mrb, mrb_value x)
   }
   val = mrb_integer(x);
   if (val == 0) return x;
-  if (width < 0) {
-    if (width == MRB_INT_MIN) return rshift(mrb, val, MRB_INT_BIT);
-    return rshift(mrb, val, -width);
+  if (!mrb_num_shift(mrb, val, width, &val)) {
+    int_overflow(mrb, "bit shift");
   }
-  return lshift(mrb, val, width);
+  return mrb_int_value(mrb, val);
 }
 
 /* 15.2.8.3.13 */
 /*
  * call-seq:
- *   fix >> count  ->  integer or float
+ *   int >> count  ->  integer or float
  *
- * Shifts _fix_ right _count_ positions (left if _count_ is negative).
+ * Shifts _int_ right _count_ positions (left if _count_ is negative).
  */
 
 static mrb_value
@@ -1384,19 +1387,19 @@ int_rshift(mrb_state *mrb, mrb_value x)
   }
   val = mrb_integer(x);
   if (val == 0) return x;
-  if (width < 0) {
-    if (width == MRB_INT_MIN) int_overflow(mrb, "bit shift");
-    return lshift(mrb, val, -width);
+  if (width == MRB_INT_MIN) int_overflow(mrb, "bit shift");
+  if (!mrb_num_shift(mrb, val, -width, &val)) {
+    int_overflow(mrb, "bit shift");
   }
-  return rshift(mrb, val, width);
+  return mrb_int_value(mrb, val);
 }
 
 /* 15.2.8.3.23 */
 /*
  *  call-seq:
- *     fix.to_f  ->  float
+ *     int.to_f  ->  float
  *
- *  Converts <i>fix</i> to a <code>Float</code>.
+ *  Converts <i>int</i> to a <code>Float</code>.
  *
  */
 
@@ -1502,7 +1505,7 @@ mrb_num_plus(mrb_state *mrb, mrb_value x, mrb_value y)
 /* 15.2.8.3.1  */
 /*
  * call-seq:
- *   fix + numeric  ->  numeric_result
+ *   int + numeric  ->  numeric_result
  *
  * Performs addition: the class of the resulting object depends on
  * the class of <code>numeric</code> and on the magnitude of the
@@ -1575,7 +1578,7 @@ mrb_num_minus(mrb_state *mrb, mrb_value x, mrb_value y)
 /* 15.2.8.3.16 */
 /*
  * call-seq:
- *   fix - numeric  ->  numeric_result
+ *   int - numeric  ->  numeric_result
  *
  * Performs subtraction: the class of the resulting object depends on
  * the class of <code>numeric</code> and on the magnitude of the
@@ -1641,9 +1644,9 @@ mrb_integer_to_str(mrb_state *mrb, mrb_value x, mrb_int base)
 /* 15.2.8.3.25 */
 /*
  *  call-seq:
- *     fix.to_s(base=10)  ->  string
+ *     int.to_s(base=10)  ->  string
  *
- *  Returns a string containing the representation of <i>fix</i> radix
+ *  Returns a string containing the representation of <i>int</i> radix
  *  <i>base</i> (between 2 and 36).
  *
  *     12345.to_s       #=> "12345"
@@ -1715,7 +1718,7 @@ cmpnum(mrb_state *mrb, mrb_value v1, mrb_value v2)
  *             <  => -1
  *             =  =>  0
  *             >  => +1
- *  Comparison---Returns -1, 0, or +1 depending on whether <i>fix</i> is
+ *  Comparison---Returns -1, 0, or +1 depending on whether <i>int</i> is
  *  less than, equal to, or greater than <i>numeric</i>. This is the
  *  basis for the tests in <code>Comparable</code>. When the operands are
  *  not comparable, it returns nil instead of raising an exception.
