@@ -55,8 +55,8 @@ conf.gem mgem: 'mruby-redis', checksum_hash: '3446d19fc4a3f9697b5ddbf2a904f301c4
 If there are missing dependencies, mrbgem dependencies solver will reference
 mrbgem from the core or mgem-list.
 
-To pull all gems from remote GIT repository on build, call ```rake -p```,
-or ```rake --pull-gems```.
+To pull all gems from remote GIT repository on build, call `rake -p`,
+or `rake --pull-gems`.
 
 NOTE: `:bitbucket` option supports only git. Hg is unsupported in this version.
 
@@ -200,8 +200,8 @@ Version requirement supports following operators:
 * '>=': is equal or greater
 * '<=': is equal or lesser
 * '~>': is equal or greater and is lesser than the next major version
-    * example 1: '~> 2.2.2' means '>= 2.2.2' and '< 2.3.0'
-    * example 2: '~> 2.2'   means '>= 2.2.0' and '< 3.0.0'
+  * example 1: '~> 2.2.2' means '>= 2.2.2' and '< 2.3.0'
+  * example 2: '~> 2.2'   means '>= 2.2.0' and '< 3.0.0'
 
 When more than one version requirements is passed, the dependency must satisfy all of it.
 
@@ -215,7 +215,7 @@ use `MRuby::Build#gem` in the build configuration to override default gem.
 If you have conflicting GEMs use the following method:
 
 * `spec.add_conflict(gem, *requirements)`
-    * The `requirements` argument is same as in `add_dependency` method.
+  * The `requirements` argument is same as in `add_dependency` method.
 
 like following code:
 
@@ -273,7 +273,7 @@ mrbgems expects that you have implemented a C method called
 by the name of your GEM. If you call your GEM `c_extension_example`, your
 initialisation method could look like this:
 
-```C
+```c
 void
 mrb_c_extension_example_gem_init(mrb_state* mrb) {
   struct RClass *class_cextension = mrb_define_module(mrb, "CExtension");
@@ -288,7 +288,7 @@ mrbgems expects that you have implemented a C method called
 by the name of your GEM. If you call your GEM `c_extension_example`, your
 finalizer method could look like this:
 
-```C
+```c
 void
 mrb_c_extension_example_gem_final(mrb_state* mrb) {
   free(someone);

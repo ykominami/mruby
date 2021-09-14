@@ -13,7 +13,6 @@
 
 #include <ctype.h>
 #include <errno.h>
-#include <stdlib.h>
 #include <string.h>
 #include <mruby.h>
 #include <mruby/compile.h>
@@ -34,7 +33,6 @@ typedef struct mrb_parser_heredoc_info parser_heredoc_info;
 static int yyparse(parser_state *p);
 static int yylex(void *lval, parser_state *p);
 static void yyerror(parser_state *p, const char *s);
-static void yywarn(parser_state *p, const char *s);
 static void yywarning(parser_state *p, const char *s);
 static void backref_error(parser_state *p, node *n);
 static void void_expr_error(parser_state *p, node *n);
@@ -106,7 +104,7 @@ parser_palloc(parser_state *p, size_t size)
   void *m = mrb_pool_alloc(p->pool, size);
 
   if (!m) {
-    MRB_THROW(p->jmp);
+    MRB_THROW(p->mrb->jmp);
   }
   return m;
 }
@@ -286,9 +284,10 @@ local_var_p(parser_state *p, mrb_sym sym)
     const mrb_sym *v = ir->lv;
     int i;
 
-    if (!v) break;
-    for (i=0; i+1 < ir->nlocals; i++) {
-      if (v[i] == sym) return TRUE;
+    if (v) {
+      for (i=0; i+1 < ir->nlocals; i++) {
+        if (v[i] == sym) return TRUE;
+      }
     }
     if (MRB_PROC_SCOPE_P(u)) break;
     u = u->upper;
@@ -1247,7 +1246,7 @@ call_with_block(parser_state *p, node *a, node *b)
 }
 
 static node*
-negate_lit(parser_state *p, node *n)
+new_negate(parser_state *p, node *n)
 {
   return cons((node*)NODE_NEGATE, n);
 }
@@ -1623,7 +1622,7 @@ bodystmt        : compstmt
                         NODE_LINENO($$, $1);
                       }
                       else if ($3) {
-                        yywarn(p, "else without rescue is useless");
+                        yywarning(p, "else without rescue is useless");
                         $$ = push($1, $3);
                       }
                       else {
@@ -1753,6 +1752,44 @@ command_asgn    : lhs '=' command_rhs
                 | primary_value tCOLON2 tIDENTIFIER tOP_ASGN command_rhs
                     {
                       $$ = new_op_asgn(p, new_call(p, $1, $3, 0, tCOLON2), $4, $5);
+                    }
+                | defn_head f_opt_arglist_paren '=' command
+                    {
+                      $$ = $1;
+                      endless_method_name(p, $1);
+                      void_expr_error(p, $4);
+                      defn_setup(p, $$, $2, $4);
+                      nvars_unnest(p);
+                      p->in_def--;
+                    }
+                | defn_head f_opt_arglist_paren '=' command modifier_rescue arg
+                    {
+                      $$ = $1;
+                      endless_method_name(p, $1);
+                      void_expr_error(p, $4);
+                      void_expr_error(p, $6);
+                      defn_setup(p, $$, $2, new_mod_rescue(p, $4, $6));
+                      nvars_unnest(p);
+                      p->in_def--;
+                    }
+                | defs_head f_opt_arglist_paren '=' command
+                    {
+                      $$ = $1;
+                      void_expr_error(p, $4);
+                      defs_setup(p, $$, $2, $4);
+                      nvars_unnest(p);
+                      p->in_def--;
+                      p->in_single--;
+                    }
+                | defs_head f_opt_arglist_paren '=' command modifier_rescue arg
+                    {
+                      $$ = $1;
+                      void_expr_error(p, $4);
+                      void_expr_error(p, $6);
+                      defs_setup(p, $$, $2, new_mod_rescue(p, $4, $6));
+                      nvars_unnest(p);
+                      p->in_def--;
+                      p->in_single--;
                     }
                 | backref tOP_ASGN command_rhs
                     {
@@ -2253,11 +2290,11 @@ arg             : lhs '=' arg_rhs
                     }
                 | tUMINUS_NUM tINTEGER tPOW arg
                     {
-                      $$ = call_uni_op(p, call_bin_op(p, $2, "**", $4), "-@");
+                      $$ = new_negate(p, call_bin_op(p, $2, "**", $4));
                     }
                 | tUMINUS_NUM tFLOAT tPOW arg
                     {
-                      $$ = call_uni_op(p, call_bin_op(p, $2, "**", $4), "-@");
+                      $$ = new_negate(p, call_bin_op(p, $2, "**", $4));
                     }
                 | tUPLUS arg
                     {
@@ -2265,7 +2302,7 @@ arg             : lhs '=' arg_rhs
                     }
                 | tUMINUS arg
                     {
-                      $$ = call_uni_op(p, $2, "-@");
+                      $$ = new_negate(p, $2);
                     }
                 | arg '|' arg
                     {
@@ -2370,7 +2407,7 @@ arg             : lhs '=' arg_rhs
                       nvars_unnest(p);
                       p->in_def--;
                     }
-                | defs_head f_arglist_paren '=' arg
+                | defs_head f_opt_arglist_paren '=' arg
                     {
                       $$ = $1;
                       void_expr_error(p, $4);
@@ -2379,7 +2416,7 @@ arg             : lhs '=' arg_rhs
                       p->in_def--;
                       p->in_single--;
                     }
-                | defs_head f_arglist_paren '=' arg modifier_rescue arg
+                | defs_head f_opt_arglist_paren '=' arg modifier_rescue arg
                     {
                       $$ = $1;
                       void_expr_error(p, $4);
@@ -2548,8 +2585,7 @@ opt_block_arg   : comma block_arg
                     }
                 ;
 
-comma           : ','
-                | ','  opt_nl heredoc_bodies
+comma           : ','  opt_nl
                 ;
 
 args            : arg
@@ -3268,7 +3304,11 @@ string_fragment : tCHAR
                     }
                 | tSTRING_BEG string_rep tSTRING
                     {
-                      $$ = new_dstr(p, push($2, $3));
+                      node *n = $2;
+                      if (intn($3->cdr->cdr) > 0) {
+                        n = push(n, $3);
+                      }
+                      $$ = new_dstr(p, n);
                     }
                 ;
 
@@ -3310,7 +3350,11 @@ xstring         : tXSTRING_BEG tXSTRING
                     }
                 | tXSTRING_BEG string_rep tXSTRING
                     {
-                      $$ = new_dxstr(p, push($2, $3));
+                      node *n = $2;
+                      if (intn($3->cdr->cdr) > 0) {
+                        n = push(n, $3);
+                      }
+                      $$ = new_dxstr(p, n);
                     }
                 ;
 
@@ -3373,7 +3417,11 @@ words           : tWORDS_BEG tSTRING
                     }
                 | tWORDS_BEG string_rep tSTRING
                     {
-                      $$ = new_words(p, push($2, $3));
+                      node *n = $2;
+                      if (intn($3->cdr->cdr) > 0) {
+                        n = push(n, $3);
+                      }
+                      $$ = new_words(p, n);
                     }
                 ;
 
@@ -3385,8 +3433,12 @@ symbol          : basic_symbol
                     }
                 | tSYMBEG tSTRING_BEG string_rep tSTRING
                     {
+                      node *n = $3;
                       p->lstate = EXPR_ENDARG;
-                      $$ = new_dsym(p, new_dstr(p, push($3, $4)));
+                      if (intn($4->cdr->cdr) > 0) {
+                        n = push(n, $4);
+                      }
+                      $$ = new_dsym(p, new_dstr(p, n));
                     }
                 ;
 
@@ -3416,7 +3468,11 @@ symbols         : tSYMBOLS_BEG tSTRING
                     }
                 | tSYMBOLS_BEG string_rep tSTRING
                     {
-                      $$ = new_symbols(p, push($2, $3));
+                      node *n = $2;
+                      if (intn($3->cdr->cdr) > 0) {
+                        n = push(n, $3);
+                      }
+                      $$ = new_symbols(p, n);
                     }
                 ;
 
@@ -3424,11 +3480,11 @@ numeric         : tINTEGER
                 | tFLOAT
                 | tUMINUS_NUM tINTEGER          %prec tLOWEST
                     {
-                      $$ = negate_lit(p, $2);
+                      $$ = new_negate(p, $2);
                     }
                 | tUMINUS_NUM tFLOAT            %prec tLOWEST
                     {
-                      $$ = negate_lit(p, $2);
+                      $$ = new_negate(p, $2);
                     }
                 ;
 
@@ -3938,22 +3994,22 @@ assocs          : assoc
                     }
                 ;
 
-label_tag       : tLABEL_TAG
-                | tLABEL_TAG heredoc_bodies
-                ;
-
 assoc           : arg tASSOC arg
                     {
                       void_expr_error(p, $1);
                       void_expr_error(p, $3);
                       $$ = cons($1, $3);
                     }
-                | tIDENTIFIER label_tag arg
+                | tIDENTIFIER tLABEL_TAG arg
                     {
                       void_expr_error(p, $3);
                       $$ = cons(new_sym(p, $1), $3);
                     }
-                | string_fragment label_tag arg
+                | tIDENTIFIER tLABEL_TAG
+                    {
+                      $$ = cons(new_sym(p, $1), new_lvar(p, $1));
+                    }
+                | string_fragment tLABEL_TAG arg
                     {
                       void_expr_error(p, $3);
                       if (typen($1->car) == NODE_DSTR) {
@@ -4012,7 +4068,7 @@ opt_terms       : /* none */
                 ;
 
 opt_nl          : /* none */
-                | nl
+                | opt_nl nl
                 ;
 
 rparen          : opt_terms ')'
@@ -4025,7 +4081,6 @@ trailer         : /* none */
 
 term            : ';' {yyerrok;}
                 | nl
-                | heredoc_body
                 ;
 
 nl              : '\n'
@@ -4033,6 +4088,7 @@ nl              : '\n'
                       p->lineno += $<num>1;
                       p->column = 0;
                     }
+                | heredoc_body
                 ;
 
 terms           : term
@@ -4087,7 +4143,7 @@ yyerror_c(parser_state *p, const char *msg, char c)
 }
 
 static void
-yywarn(parser_state *p, const char *s)
+yywarning(parser_state *p, const char *s)
 {
   char* c;
   size_t n;
@@ -4112,12 +4168,6 @@ yywarn(parser_state *p, const char *s)
     p->warn_buffer[p->nwarn].column = p->column;
   }
   p->nwarn++;
-}
-
-static void
-yywarning(parser_state *p, const char *s)
-{
-  yywarn(p, s);
 }
 
 static void
@@ -6225,10 +6275,10 @@ parser_yylex(parser_state *p)
       if (last_state == EXPR_FNAME) goto gvar;
       tokfix(p);
       {
-        unsigned long n = strtoul(tok(p), NULL, 10);
-        if (n > INT_MAX) {
-          yyerror(p, "capture group index must be <= " MRB_STRINGIZE(INT_MAX));
-          return 0;
+        mrb_int n = mrb_int_read(tok(p), NULL, NULL);
+        if (n > INT32_MAX) {
+          yywarning(p, "capture group index too big; always nil");
+          return keyword_nil;
         }
         pylval.nd = new_nth_ref(p, (int)n);
       }
@@ -6513,6 +6563,7 @@ parser_update_cxt(parser_state *p, mrbc_context *cxt)
   int i = 0;
 
   if (!cxt) return;
+  if (!p->tree) return;
   if (intn(p->tree->car) != NODE_SCOPE) return;
   n0 = n = p->tree->cdr->car;
   while (n) {
@@ -6533,53 +6584,39 @@ MRB_API void
 mrb_parser_parse(parser_state *p, mrbc_context *c)
 {
   struct mrb_jmpbuf buf1;
-  p->jmp = &buf1;
+  struct mrb_jmpbuf *prev = p->mrb->jmp;
+  p->mrb->jmp = &buf1;
 
-  MRB_TRY(p->jmp) {
+  MRB_TRY(p->mrb->jmp) {
     int n = 1;
 
     p->cmd_start = TRUE;
     p->in_def = p->in_single = 0;
     p->nerr = p->nwarn = 0;
     p->lex_strterm = NULL;
-
     parser_init_cxt(p, c);
 
-    if (p->mrb->jmp) {
-      n = yyparse(p);
-    }
-    else {
-      struct mrb_jmpbuf buf2;
-
-      p->mrb->jmp = &buf2;
-      MRB_TRY(p->mrb->jmp) {
-        n = yyparse(p);
-      }
-      MRB_CATCH(p->mrb->jmp) {
-        p->nerr++;
-      }
-      MRB_END_EXC(p->mrb->jmp);
-      p->mrb->jmp = 0;
-    }
+    n = yyparse(p);
     if (n != 0 || p->nerr > 0) {
       p->tree = 0;
+      p->mrb->jmp = prev;
       return;
-    }
-    if (!p->tree) {
-      p->tree = new_nil(p);
     }
     parser_update_cxt(p, c);
     if (c && c->dump_result) {
       mrb_parser_dump(p->mrb, p->tree, 0);
     }
   }
-  MRB_CATCH(p->jmp) {
-    yyerror(p, "memory allocation error");
+  MRB_CATCH(p->mrb->jmp) {
     p->nerr++;
-    p->tree = 0;
-    return;
+    if (p->mrb->exc == NULL) {
+      yyerror(p, "memory allocation error");
+      p->nerr++;
+      p->tree = 0;
+    }
   }
   MRB_END_EXC(p->jmp);
+  p->mrb->jmp = prev;
 }
 
 MRB_API parser_state*
@@ -7719,4 +7756,20 @@ mrb_parser_dump(mrb_state *mrb, node *tree, int offset)
     break;
   }
 #endif
+}
+
+typedef mrb_bool mrb_parser_foreach_top_variable_func(mrb_state *mrb, mrb_sym sym, void *user);
+void mrb_parser_foreach_top_variable(mrb_state *mrb, struct mrb_parser_state *p, mrb_parser_foreach_top_variable_func *func, void *user);
+
+void
+mrb_parser_foreach_top_variable(mrb_state *mrb, struct mrb_parser_state *p, mrb_parser_foreach_top_variable_func *func, void *user)
+{
+  const mrb_ast_node *n = p->tree;
+  if ((intptr_t)n->car == NODE_SCOPE) {
+    n = n->cdr->car;
+    for (; n; n = n->cdr) {
+      mrb_sym sym = sym(n->car);
+      if (sym && !func(mrb, sym, user)) break;
+    }
+  }
 }

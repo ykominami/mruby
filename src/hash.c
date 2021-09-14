@@ -970,7 +970,7 @@ h_key_for(mrb_state *mrb, mrb_value key)
 static struct RHash*
 h_alloc(mrb_state *mrb)
 {
-  return (struct RHash*)mrb_obj_alloc(mrb, MRB_TT_HASH, mrb->hash_class);
+  return MRB_OBJ_ALLOC(mrb, MRB_TT_HASH, mrb->hash_class);
 }
 
 static void
@@ -1482,6 +1482,7 @@ static mrb_value
 mrb_hash_delete(mrb_state *mrb, mrb_value self)
 {
   mrb_value key = mrb_get_arg1(mrb);
+  mrb->c->ci->mid = 0;
   return mrb_hash_delete_key(mrb, self, key);
 }
 

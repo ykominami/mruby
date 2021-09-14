@@ -22,8 +22,6 @@ worldwide. This software is distributed without any warranty.
 
 See <https://creativecommons.org/publicdomain/zero/1.0/>. */
 
-#include <stdint.h>
-
 /* This is xoshiro128++ 1.0, one of our 32-bit all-purpose, rock-solid
    generators. It has excellent speed, a state size (128 bits) that is
    large enough for mild parallelism, and it passes all tests we are aware
@@ -60,12 +58,17 @@ rand_init(rand_state *t)
 #endif
 }
 
+static uint32_t rand_uint32(rand_state *state);
+
 static uint32_t
 rand_seed(rand_state *t, uint32_t seed)
 {
   uint32_t old_seed = t->seed[SEEDPOS];
   rand_init(t);
   t->seed[SEEDPOS] = seed;
+  for (int i = 0; i < 10; i++) {
+    rand_uint32(t);
+  }
   return old_seed;
 }
 
@@ -151,14 +154,6 @@ get_opt(mrb_state* mrb)
   return arg;
 }
 
-static void
-random_check(mrb_state *mrb, mrb_value random) {
-  struct RClass *c = mrb_class_get_id(mrb, MRB_SYM(Random));
-  if (!mrb_obj_is_kind_of(mrb, random, c) || !mrb_istruct_p(random)) {
-    mrb_raise(mrb, E_TYPE_ERROR, "Random instance required");
-  }
-}
-
 static mrb_value
 random_default(mrb_state *mrb) {
   struct RClass *c = mrb_class_get_id(mrb, MRB_SYM(Random));
@@ -229,46 +224,12 @@ static mrb_value
 mrb_ary_shuffle_bang(mrb_state *mrb, mrb_value ary)
 {
   mrb_int i, max;
-  mrb_value r = mrb_nil_value();
   rand_state *random;
 
- /*
- * MSC compiler bug generating invalid instructions with optimization
- * enabled. MSC errantly uses a hardcoded value with optimizations on
- * when using a fixed value from a union.
- * Creating a temp volatile variable and reassigning back to the original
- * value tricks the compiler to not perform this optimization;
- */
-#if defined _MSC_VER && _MSC_VER >= 1923
-  /* C++ will not cast away volatile easily, so we cannot do something like
-   * volatile mrb_value rr = r; r = (mrb_value)rr; with C++.
-   * That cast does work with C.
-   * We also have to trick the compiler to not optimize away the const_cast entirely
-   * by creating and manipulating an intermediate volatile pointer.
-   */
-  volatile mrb_value *v_r;
-  volatile mrb_int ii;
-  mrb_value *p_r;
-  v_r = &r;
-  ii = 2;
-  v_r = v_r + 2;
-#if defined __cplusplus
-  p_r = const_cast<mrb_value*>(v_r - ii);
-#else
-  p_r = (mrb_value*)v_r - ii;
-#endif
-  r = *p_r;
-#endif
-
   if (RARRAY_LEN(ary) > 1) {
-    mrb_get_args(mrb, "|o", &r);
-
-    if (mrb_nil_p(r)) {
+    struct RClass *c = mrb_class_get_id(mrb, MRB_SYM(Random));
+    if (mrb_get_args(mrb, "|I", &random, c) == 0) {
       random = random_default_state(mrb);
-    }
-    else {
-      random_check(mrb, r);
-      random = random_ptr(r);
     }
     mrb_ary_modify(mrb, mrb_ary_ptr(ary));
     max = RARRAY_LEN(ary);
@@ -324,17 +285,12 @@ mrb_ary_sample(mrb_state *mrb, mrb_value ary)
 {
   mrb_int n = 0;
   mrb_bool given;
-  mrb_value r = mrb_nil_value();
   rand_state *random;
   mrb_int len;
+  struct RClass *c = mrb_class_get_id(mrb, MRB_SYM(Random));
 
-  mrb_get_args(mrb, "|i?o", &n, &given, &r);
-  if (mrb_nil_p(r)) {
+  if (mrb_get_args(mrb, "|i?I", &n, &given, &random, c) < 2) {
     random = random_default_state(mrb);
-  }
-  else {
-    random_check(mrb, r);
-    random = random_ptr(r);
   }
   len = RARRAY_LEN(ary);
   if (!given) {                 /* pick one element */

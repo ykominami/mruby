@@ -10,78 +10,59 @@ def assert_pack tmpl, packed, unpacked
 end
 
 # pack & unpack 'm' (base64)
-assert('[""].pack("m")') do
+assert('pack("m")') do
   assert_pack "m", "", [""]
-end
-
-assert('["\0"].pack("m")') do
   assert_pack "m", "AA==\n", ["\0"]
-end
-
-assert('["\0\0"].pack("m")') do
   assert_pack "m", "AAA=\n", ["\0\0"]
-end
-
-assert('["\0\0\0"].pack("m")') do
   assert_pack "m", "AAAA\n", ["\0\0\0"]
-end
-
-assert('["abc..xyzABC..XYZ"].pack("m")') do
   assert_pack "m", "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXpBQkNERUZHSElKS0xNTk9QUVJT\nVFVWV1hZWg==\n", ["abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"]
-end
 
-assert('"YWJ...".unpack("m") should "abc..xyzABC..XYZ"') do
   ary = ["abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"]
   assert_equal ary, "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXpBQkNERUZHSElKS0xNTk9QUVJT\nVFVWV1hZWg==\n".unpack("m")
   assert_equal ary, "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXpBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWg==\n".unpack("m")
-end
 
-assert('["A", "B"].pack') do
   assert_equal "QQ==\n", ["A", "B"].pack("m50")
   assert_equal ["A"], "QQ==\n".unpack("m50")
   assert_equal "QQ==Qg==", ["A", "B"].pack("m0 m0")
   assert_equal ["A", "B"], "QQ==Qg==".unpack("m10 m10")
-end
-
-assert('["abc..xyzABC..XYZ"].pack("m0")') do
   assert_pack "m0", "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXpBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWg==", ["abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"]
 end
 
-# pack & unpack 'H'
-assert('["3031"].pack("H*")') do
-  assert_pack "H*", "01", ["3031"]
+# pack & unpack 'M' (Quoted-printable)
+assert('pack("M")') do
+  assert_pack "M", "123=\n", ["123"]
+  assert_pack "M", "=3D\n", ["=\n"]
+  assert_pack "M", "=E3=81=82=\n", ["あ"]
+
+  assert_equal ["123"], "123=\n".unpack("M")
+  assert_equal ["=\n"], "=3D\n".unpack("M")
+  assert_equal ["あ"], "=E3=81=82=\n".unpack("M")
 end
 
-assert('["10"].pack("H*")') do
+# pack & unpack 'H'
+assert('pack("H")') do
+  assert_pack "H*", "01", ["3031"]
   assert_pack "H*", "\020", ["10"]
 end
 
-assert('[0,1,127,128,255].pack("C*")') do
+assert('pack("C")') do
   assert_pack "C*", "\x00\x01\x7F\x80\xFF", [0, 1, 127, 128, 255]
 end
 
-# pack "a"
-assert('["abc"].pack("a")') do
+assert('pack("a")') do
   assert_equal "a", ["abc"].pack("a")
   assert_equal "abc", ["abc"].pack("a*")
   assert_equal "abc\0", ["abc"].pack("a4")
-end
 
-# upack "a"
-assert('["abc"].pack("a")') do
   assert_equal ["abc\0"], "abc\0".unpack("a4")
   assert_equal ["abc "], "abc ".unpack("a4")
 end
 
-# pack "A"
-assert('["abc"].pack("A")') do
+assert('pack("A")') do
   assert_equal "a", ["abc"].pack("A")
   assert_equal "abc", ["abc"].pack("A*")
   assert_equal "abc ", ["abc"].pack("A4")
-end
 
-# upack "A"
-assert('["abc"].pack("A")') do
   assert_equal ["abc"], "abc\0".unpack("A4")
   assert_equal ["abc"], "abc ".unpack("A4")
 end
@@ -141,6 +122,12 @@ assert 'pack/unpack "I"' do
     str = "\0" * (uint_size-2) + "\x30\x39"
   end
   assert_pack 'I', str, [12345]
+end
+
+assert 'pack/unpack "w"' do
+  for x in [0,1,127,128,16383,16384,65535,65536]
+    assert_equal [x], [x].pack("w").unpack("w")
+  end
 end
 
 assert 'pack/unpack "U"' do

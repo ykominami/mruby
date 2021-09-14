@@ -150,7 +150,7 @@ class Array
   #    [ 1, 1, 3, 5 ] & [ 1, 2, 3 ]   #=> [ 1, 3 ]
   #
   def &(elem)
-    raise TypeError, "can't convert #{elem.class} into Array" unless elem.class == Array
+    raise TypeError, "cannot convert #{elem.class} into Array" unless elem.class == Array
 
     hash = {}
     array = []
@@ -204,7 +204,7 @@ class Array
   #    a.intersect?(b)   #=> true
   #    a.intersect?(c)   #=> false
   def intersect?(ary)
-    raise TypeError, "can't convert #{ary.class} into Array" unless ary.class == Array
+    raise TypeError, "cannot convert #{ary.class} into Array" unless ary.class == Array
 
     hash = {}
     if self.length > ary.length
@@ -291,41 +291,6 @@ class Array
       self.replace(ar)
     else
       nil
-    end
-  end
-
-  ##
-  # call-seq:
-  #    ary.compact     -> new_ary
-  #
-  # Returns a copy of +self+ with all +nil+ elements removed.
-  #
-  #    [ "a", nil, "b", nil, "c", nil ].compact
-  #                      #=> [ "a", "b", "c" ]
-  #
-  def compact
-    result = self.dup
-    result.compact!
-    result
-  end
-
-  ##
-  # call-seq:
-  #    ary.compact!    -> ary  or  nil
-  #
-  # Removes +nil+ elements from the array.
-  # Returns +nil+ if no changes were made, otherwise returns
-  # <i>ary</i>.
-  #
-  #    [ "a", nil, "b", nil, "c" ].compact! #=> [ "a", "b", "c" ]
-  #    [ "a", "b", "c" ].compact!           #=> nil
-  #
-  def compact!
-    result = self.select { |e| !e.nil? }
-    if result.size == self.size
-      nil
-    else
-      self.replace(result)
     end
   end
 
@@ -421,7 +386,6 @@ class Array
     end
 
     beg = len = 0
-    ary = []
     if block
       if arg0.nil? && arg1.nil? && arg2.nil?
         # ary.fill { |index| block }                    -> ary
@@ -481,57 +445,6 @@ class Array
       end
     end
     self
-  end
-
-  ##
-  #  call-seq:
-  #     ary.rotate(count=1)    -> new_ary
-  #
-  #  Returns a new array by rotating +self+ so that the element at +count+ is
-  #  the first element of the new array.
-  #
-  #  If +count+ is negative then it rotates in the opposite direction, starting
-  #  from the end of +self+ where +-1+ is the last element.
-  #
-  #     a = [ "a", "b", "c", "d" ]
-  #     a.rotate         #=> ["b", "c", "d", "a"]
-  #     a                #=> ["a", "b", "c", "d"]
-  #     a.rotate(2)      #=> ["c", "d", "a", "b"]
-  #     a.rotate(-3)     #=> ["b", "c", "d", "a"]
-
-  def rotate(count=1)
-    ary = []
-    len = self.length
-
-    if len > 0
-      idx = (count < 0) ? (len - (~count % len) - 1) : (count % len) # rotate count
-      len.times do
-        ary << self[idx]
-        idx += 1
-        idx = 0 if idx > len-1
-      end
-    end
-    ary
-  end
-
-  ##
-  #  call-seq:
-  #     ary.rotate!(count=1)   -> ary
-  #
-  #  Rotates +self+ in place so that the element at +count+ comes first, and
-  #  returns +self+.
-  #
-  #  If +count+ is negative then it rotates in the opposite direction, starting
-  #  from the end of the array where +-1+ is the last element.
-  #
-  #     a = [ "a", "b", "c", "d" ]
-  #     a.rotate!        #=> ["b", "c", "d", "a"]
-  #     a                #=> ["b", "c", "d", "a"]
-  #     a.rotate!(2)     #=> ["d", "a", "b", "c"]
-  #     a.rotate!(-3)    #=> ["a", "b", "c", "d"]
-
-  def rotate!(count=1)
-    self.replace(self.rotate(count))
   end
 
   ##
@@ -746,7 +659,6 @@ class Array
     return to_enum :keep_if unless block
 
     idx = 0
-    len = self.size
     while idx < self.size do
       if block.call(self[idx])
         idx += 1
@@ -961,7 +873,7 @@ class Array
   #    ary.to_h                ->   Hash
   #    ary.to_h{|item| ... }   ->   Hash
   #
-  # Returns the result of interpreting <i>aray</i> as an array of
+  # Returns the result of interpreting <i>array</i> as an array of
   # <tt>[key, value]</tt> pairs. If a block is given, it should
   # return <tt>[key, value]</tt> pairs to construct a hash.
   #

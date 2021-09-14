@@ -37,7 +37,7 @@ static struct RBasic*
 rational_alloc(mrb_state *mrb, struct RClass *c, struct mrb_rational **p)
 {
   struct RRational *s;
-  s = (struct RRational*)mrb_obj_alloc(mrb, MRB_TT_RATIONAL, c);
+  s = MRB_OBJ_ALLOC(mrb, MRB_TT_RATIONAL, c);
 #ifdef RATIONAL_INLINE
   *p = &s->r;
 #else
@@ -155,7 +155,6 @@ rational_new_i(mrb_state *mrb, mrb_int n, mrb_int d)
 }
 
 #ifndef MRB_NO_FLOAT
-#include <math.h>
 
 #if defined(MRB_INT32) || defined(MRB_USE_FLOAT32)
 #define frexp_rat(x,exp) frexpf((float)x, exp)
@@ -255,20 +254,20 @@ rational_s_new(mrb_state *mrb, mrb_value self)
     }
     else {
       mrb_float numf = (mrb_float)numerator;
-      mrb_float denomf = mrb_to_flo(mrb, denomv);
+      mrb_float denomf = mrb_as_float(mrb, denomv);
 
       return rational_new_f(mrb, numf/denomf);
     }
   }
   else {
-    mrb_float numf = mrb_to_flo(mrb, numv);
+    mrb_float numf = mrb_as_float(mrb, numv);
     mrb_float denomf;
 
     if (mrb_integer_p(denomv)) {
       denomf = (mrb_float)mrb_integer(denomv);
     }
     else {
-      denomf = mrb_to_flo(mrb, denomv);
+      denomf = mrb_as_float(mrb, denomv);
     }
     return rational_new_f(mrb, numf/denomf);
   }
@@ -278,7 +277,7 @@ rational_s_new(mrb_state *mrb, mrb_value self)
 
 #ifndef MRB_NO_FLOAT
 static mrb_float
-rat_to_flo(struct mrb_rational *p)
+rat_float(struct mrb_rational *p)
 {
   mrb_float f;
 
@@ -296,7 +295,7 @@ static mrb_value
 rational_to_f(mrb_state *mrb, mrb_value self)
 {
   struct mrb_rational *p = rational_ptr(mrb, self);
-  return mrb_float_value(mrb, rat_to_flo(p));
+  return mrb_float_value(mrb, rat_float(p));
 }
 #endif
 
@@ -346,8 +345,8 @@ rational_m(mrb_state *mrb, mrb_value self)
     return rational_new_i(mrb, mrb_integer(a), mrb_integer(b));
   }
   else {
-    mrb_float x = mrb_to_flo(mrb, a);
-    mrb_float y = mrb_to_flo(mrb, b);
+    mrb_float x = mrb_as_float(mrb, a);
+    mrb_float y = mrb_as_float(mrb, b);
     return rational_new_f(mrb, x/y);
   }
 #endif
@@ -436,7 +435,7 @@ rational_cmp(mrb_state *mrb, mrb_value x)
 #ifndef MRB_NO_FLOAT
   case MRB_TT_FLOAT:
     {
-      mrb_float a = rat_to_flo(p1), b = mrb_to_flo(mrb, y);
+      mrb_float a = rat_float(p1), b = mrb_as_float(mrb, y);
       if (a > b)
         return mrb_fixnum_value(1);
       else if (a < b)
@@ -458,7 +457,7 @@ rational_cmp(mrb_state *mrb, mrb_value x)
 #endif
 #ifdef MRB_USE_COMPLEX
   case MRB_TT_COMPLEX:
-    x = mrb_complex_new(mrb, rat_to_flo(p1), 0);
+    x = mrb_complex_new(mrb, rat_float(p1), 0);
     return mrb_funcall_id(mrb, x, MRB_OPSYM(cmp), 1, y);
 #endif
   default:
@@ -479,10 +478,6 @@ rational_minus(mrb_state *mrb, mrb_value x)
   if (n == MRB_INT_MIN) rat_overflow(mrb);
   return rational_new(mrb, -n, p->denominator);
 }
-
-#ifndef MRB_NO_FLOAT
-mrb_float mrb_div_flo(mrb_float, mrb_float);
-#endif
 
 static mrb_value
 rational_add(mrb_state *mrb, mrb_value x)
@@ -514,7 +509,7 @@ rational_add(mrb_state *mrb, mrb_value x)
   case MRB_TT_FLOAT:
     {
       mrb_float z = p1->numerator + mrb_float(y) * p1->denominator;
-      return mrb_float_value(mrb, mrb_div_flo(z, (mrb_float)p1->denominator));
+      return mrb_float_value(mrb, mrb_div_float(z, (mrb_float)p1->denominator));
     }
 #endif
 
@@ -551,7 +546,7 @@ rational_sub(mrb_state *mrb, mrb_value x)
 
 #if defined(MRB_USE_COMPLEX)
   case MRB_TT_COMPLEX:
-    x = mrb_complex_new(mrb, rat_to_flo(p1), 0);
+    x = mrb_complex_new(mrb, rat_float(p1), 0);
     return mrb_funcall_id(mrb, x, MRB_OPSYM(sub), 1, y);
 #endif
 
@@ -559,8 +554,8 @@ rational_sub(mrb_state *mrb, mrb_value x)
   case MRB_TT_FLOAT:
   default:
     {
-      mrb_float z = p1->numerator - mrb_to_flo(mrb, y) * p1->denominator;
-      return mrb_float_value(mrb, mrb_div_flo(z, (mrb_float)p1->denominator));
+      mrb_float z = p1->numerator - mrb_as_float(mrb, y) * p1->denominator;
+      return mrb_float_value(mrb, mrb_div_float(z, (mrb_float)p1->denominator));
     }
 #else
   default:
@@ -596,7 +591,7 @@ rational_mul(mrb_state *mrb, mrb_value x)
   case MRB_TT_FLOAT:
     {
       mrb_float z = p1->numerator * mrb_float(y);
-      return mrb_float_value(mrb, mrb_div_flo(z, (mrb_float)p1->denominator));
+      return mrb_float_value(mrb, mrb_div_float(z, (mrb_float)p1->denominator));
   }
 #endif
 
@@ -630,7 +625,7 @@ mrb_rational_div(mrb_state *mrb, mrb_value x)
 
 #if defined(MRB_USE_COMPLEX)
   case MRB_TT_COMPLEX:
-    x = mrb_complex_new(mrb, rat_to_flo(p1), 0);
+    x = mrb_complex_new(mrb, rat_float(p1), 0);
     return mrb_funcall_id(mrb, x, MRB_OPSYM(div), 1, y);
 #endif
 
@@ -638,8 +633,8 @@ mrb_rational_div(mrb_state *mrb, mrb_value x)
 #ifndef MRB_NO_FLOAT
   case MRB_TT_FLOAT:
     {
-      mrb_float z = mrb_div_flo((mrb_float)p1->numerator, mrb_to_flo(mrb, y));
-      return mrb_float_value(mrb, mrb_div_flo(z, (mrb_float)p1->denominator));
+      mrb_float z = mrb_div_float((mrb_float)p1->numerator, mrb_as_float(mrb, y));
+      return mrb_float_value(mrb, mrb_div_float(z, (mrb_float)p1->denominator));
     }
 #else
     mrb_raise(mrb, E_TYPE_ERROR, "non integer division");
@@ -656,7 +651,7 @@ mrb_int mrb_div_int(mrb_state *, mrb_int, mrb_int);
  * redefine Integer#/
  */
 static mrb_value
-rat_int_div(mrb_state *mrb, mrb_value x)
+rational_int_div(mrb_state *mrb, mrb_value x)
 {
   mrb_value y = mrb_get_arg1(mrb);
   mrb_int a = mrb_integer(x);
@@ -673,7 +668,7 @@ rat_int_div(mrb_state *mrb, mrb_value x)
   case MRB_TT_FLOAT:
     mrb_raise(mrb, E_TYPE_ERROR, "non integer multiplication");
 #else
-    return mrb_float_value(mrb, mrb_div_flo((mrb_float)a, mrb_to_flo(mrb, y)));
+    return mrb_float_value(mrb, mrb_div_float((mrb_float)a, mrb_as_float(mrb, y)));
 #endif
   }
 }
@@ -684,7 +679,7 @@ rat_int_div(mrb_state *mrb, mrb_value x)
  */
 
 static mrb_value
-rat_int_quo(mrb_state *mrb, mrb_value x)
+rational_int_quo(mrb_state *mrb, mrb_value x)
 {
   mrb_value y = mrb_get_arg1(mrb);
   mrb_int a = mrb_integer(x);
@@ -700,7 +695,7 @@ rat_int_quo(mrb_state *mrb, mrb_value x)
 #ifdef MRB_NO_FLOAT
     mrb_raise(mrb, E_TYPE_ERROR, "non integer multiplication");
 #else
-    return mrb_float_value(mrb, mrb_div_flo((mrb_float)a, mrb_to_flo(mrb, y)));
+    return mrb_float_value(mrb, mrb_div_float((mrb_float)a, mrb_as_float(mrb, y)));
 #endif
   }
 }
@@ -732,8 +727,8 @@ void mrb_mruby_rational_gem_init(mrb_state *mrb)
   mrb_define_method(mrb, rat, "quo", rational_div, MRB_ARGS_REQ(1));
   mrb_define_method(mrb, mrb->integer_class, "to_r", fix_to_r, MRB_ARGS_NONE());
 #ifndef MRB_USE_COMPLEX
-  mrb_define_method(mrb, mrb->integer_class, "/", rat_int_div, MRB_ARGS_REQ(1)); /* overrride */
-  mrb_define_method(mrb, mrb->integer_class, "quo", rat_int_quo, MRB_ARGS_REQ(1)); /* overrride */
+  mrb_define_method(mrb, mrb->integer_class, "/", rational_int_div, MRB_ARGS_REQ(1)); /* override */
+  mrb_define_method(mrb, mrb->integer_class, "quo", rational_int_quo, MRB_ARGS_REQ(1)); /* override */
 #endif
   mrb_define_method(mrb, mrb->kernel_module, "Rational", rational_m, MRB_ARGS_ARG(1,1));
 }

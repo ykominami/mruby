@@ -111,36 +111,6 @@ class String
     (s == self) ? nil : self.replace(s)
   end
 
-  ##
-  # call-seq:
-  #    str.casecmp(other_str)   -> -1, 0, +1 or nil
-  #
-  # Case-insensitive version of <code>String#<=></code>.
-  #
-  #    "abcdef".casecmp("abcde")     #=> 1
-  #    "aBcDeF".casecmp("abcdef")    #=> 0
-  #    "abcdef".casecmp("abcdefg")   #=> -1
-  #    "abcdef".casecmp("ABCDEF")    #=> 0
-  #
-  def casecmp(str)
-    self.downcase <=> str.__to_str.downcase
-  rescue NoMethodError
-    nil
-  end
-
-  ##
-  # call-seq:
-  #   str.casecmp?(other)  -> true, false, or nil
-  #
-  # Returns true if str and other_str are equal after case folding,
-  # false if they are not equal, and nil if other_str is not a string.
-
-  def casecmp?(str)
-    c = self.casecmp(str)
-    return nil if c.nil?
-    return c == 0
-  end
-
   def partition(sep)
     raise TypeError, "type mismatch: #{sep.class} given" unless sep.is_a? String
     n = index(sep)
@@ -344,8 +314,6 @@ class String
   end
 
   def codepoints(&block)
-    len = self.size
-
     if block_given?
       self.split('').each do|x|
         block.call(x.ord)
@@ -459,14 +427,14 @@ class String
       break if exclusive and n == 0
       yield bs
       break if n == 0
+      bsiz = bs.size
+      break if bsiz > max.size || bsiz == 0
       bs = bs.succ
     end
     self
   end
 
   def __upto_endless(&block)
-    return to_enum(:__upto_endless) unless block
-
     len = self.length
     # both edges are all digits
     bi = self.to_i(10)

@@ -14,7 +14,6 @@
 #include <sys/stat.h>
 
 #include <fcntl.h>
-#include <limits.h>
 
 #include <errno.h>
 #include <stdlib.h>
@@ -117,14 +116,14 @@ static mrb_value
 mrb_file_s_unlink(mrb_state *mrb, mrb_value obj)
 {
   const mrb_value *argv;
-  mrb_value pathv;
   mrb_int argc, i;
   char *path;
 
   mrb_get_args(mrb, "*", &argv, &argc);
   for (i = 0; i < argc; i++) {
     const char *utf8_path;
-    pathv = mrb_ensure_string_type(mrb, argv[i]);
+    mrb_value pathv = argv[i];
+    mrb_ensure_string_type(mrb, pathv);
     utf8_path = RSTRING_CSTR(mrb, pathv);
     path = mrb_locale_from_utf8(utf8_path, -1);
     if (UNLINK(path) < 0) {
@@ -497,7 +496,7 @@ mrb_file_truncate(mrb_state *mrb, mrb_value self)
   mrb_value lenv = mrb_get_arg1(mrb);
 
   fd = mrb_io_fileno(mrb, self);
-  length = mrb_int(mrb, lenv);
+  length = mrb_as_int(mrb, lenv);
   if (mrb_ftruncate(fd, length) != 0) {
     mrb_raise(mrb, E_IO_ERROR, "ftruncate failed");
   }

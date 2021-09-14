@@ -4,10 +4,7 @@
 ** See Copyright Notice in mruby.h
 */
 
-#include <limits.h>
-#include <stdlib.h>
-#include <string.h>
-#include <math.h>
+#include <mruby.h>
 #include <mruby/dump.h>
 #include <mruby/irep.h>
 #include <mruby/proc.h>
@@ -16,6 +13,7 @@
 #include <mruby/error.h>
 #include <mruby/data.h>
 #include <mruby/endian.h>
+#include <string.h>
 
 #if SIZE_MAX < UINT32_MAX
 # error size_t must be at least 32 bits wide
@@ -59,8 +57,6 @@ str_to_double(mrb_state *mrb, const char *p)
   return u.f;
 }
 #endif
-
-mrb_value mrb_str_len_to_inum(mrb_state *mrb, const char *str, size_t len, mrb_int base, int badcheck);
 
 static mrb_bool
 read_irep_record_1(mrb_state *mrb, const uint8_t *bin, size_t *len, uint8_t flags, mrb_irep **irepp)
@@ -146,7 +142,7 @@ read_irep_record_1(mrb_state *mrb, const uint8_t *bin, size_t *len, uint8_t flag
         }
         break;
       case IREP_TT_INT64:
-#ifdef MRB_64BIT
+#ifdef MRB_INT64
         {
           uint64_t i64 = bin_to_uint32(src);
           src += sizeof(uint32_t);
@@ -158,7 +154,7 @@ read_irep_record_1(mrb_state *mrb, const uint8_t *bin, size_t *len, uint8_t flag
         }
         break;
 #else
-        return FALSE;           /* INT64 not supported on MRB_32BIT */
+        return FALSE;
 #endif
 
       case IREP_TT_BIGINT:
@@ -362,6 +358,12 @@ read_debug_record(mrb_state *mrb, const uint8_t *start, mrb_irep* irep, size_t *
           file->lines.flat_map[l].line = bin_to_uint16(bin);
           bin += sizeof(uint16_t);
         }
+      } break;
+
+      case mrb_debug_line_packed_map: {
+        file->lines.packed_map = (uint8_t*)mrb_calloc(mrb, 1, (size_t)file->line_entry_count);
+        memcpy(file->lines.packed_map, bin, file->line_entry_count);
+        bin += file->line_entry_count;
       } break;
 
       default: return MRB_DUMP_GENERAL_FAILURE;
@@ -604,11 +606,7 @@ read_irep(mrb_state *mrb, const uint8_t *bin, size_t bufsize, uint8_t flags)
 static struct RProc*
 mrb_proc_read_irep(mrb_state *mrb, const uint8_t *bin)
 {
-#if defined(MRB_USE_LINK_TIME_RO_DATA_P) || defined(MRB_USE_CUSTOM_RO_DATA_P)
   uint8_t flags = mrb_ro_data_p((char*)bin) ? FLAG_SRC_STATIC : FLAG_SRC_MALLOC;
-#else
-  uint8_t flags = FLAG_SRC_STATIC;
-#endif
 
   return read_irep(mrb, bin, (size_t)-1, flags);
 }
@@ -679,7 +677,7 @@ mrb_load_irep_buf(mrb_state *mrb, const void *buf, size_t bufsize)
 MRB_API mrb_value
 mrb_load_proc(mrb_state *mrb, const struct RProc *proc)
 {
-  return mrb_vm_run(mrb, proc, mrb_top_self(mrb), 0);
+  return mrb_top_run(mrb, proc, mrb_top_self(mrb), 0);
 }
 
 #ifndef MRB_NO_STDIO

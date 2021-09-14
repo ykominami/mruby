@@ -316,44 +316,15 @@ mrb_init_object(mrb_state *mrb)
   mrb_define_method(mrb, f, "inspect", false_to_s,  MRB_ARGS_NONE());
 }
 
-static const struct types {
-  const enum mrb_vtype type;
-  const char *name;
-} builtin_types[] = {
-/*    {MRB_TT_NIL,  "nil"}, */
-  {MRB_TT_FALSE,  "false"},
-  {MRB_TT_TRUE,   "true"},
-  {MRB_TT_INTEGER,"Integer"},
-  {MRB_TT_SYMBOL, "Symbol"},  /* :symbol */
-  {MRB_TT_MODULE, "Module"},
-  {MRB_TT_OBJECT, "Object"},
-  {MRB_TT_CLASS,  "Class"},
-  {MRB_TT_ICLASS, "iClass"},  /* internal use: mixed-in module holder */
-  {MRB_TT_SCLASS, "SClass"},
-  {MRB_TT_PROC,   "Proc"},
-#ifndef MRB_NO_FLOAT
-  {MRB_TT_FLOAT,  "Float"},
-#endif
-  {MRB_TT_ARRAY,  "Array"},
-  {MRB_TT_HASH,   "Hash"},
-  {MRB_TT_STRING, "String"},
-  {MRB_TT_RANGE,  "Range"},
-/*    {MRB_TT_BIGNUM,  "Bignum"}, */
-  {MRB_TT_DATA,   "Data"},  /* internal use: wrapped C pointers */
-/*    {MRB_TT_UNDEF,  "undef"}, */ /* internal use: #undef; should not happen */
-  {MRB_TT_MAXDEFINE,  0}
-};
-
 static const char*
 type_name(enum mrb_vtype t)
 {
-  const struct types *type = builtin_types;
-
-  while (type->type < MRB_TT_MAXDEFINE) {
-    if (type->type == t) return type->name;
-    type++;
+  switch (t) {
+#define MRB_VTYPE_NAME(tt, type, name) case tt: return name;
+    MRB_VTYPE_FOREACH(MRB_VTYPE_NAME)
+#undef MRB_VTYPE_NAME
+    default: return NULL;
   }
-  return NULL;
 }
 
 static mrb_value
@@ -409,7 +380,7 @@ mrb_check_type(mrb_state *mrb, mrb_value x, enum mrb_vtype t)
     ename = "nil";
   }
   else if (mrb_integer_p(x)) {
-    ename = "Fixnum";
+    ename = "Integer";
   }
   else if (mrb_symbol_p(x)) {
     ename = "Symbol";
@@ -507,13 +478,13 @@ mrb_obj_is_kind_of(mrb_state *mrb, mrb_value obj, struct RClass *c)
 }
 
 MRB_API mrb_value
-mrb_to_int(mrb_state *mrb, mrb_value val)
+mrb_to_integer(mrb_state *mrb, mrb_value val)
 {
 
   if (!mrb_integer_p(val)) {
 #ifndef MRB_NO_FLOAT
     if (mrb_float_p(val)) {
-      return mrb_flo_to_fixnum(mrb, val);
+      return mrb_float_to_integer(mrb, val);
     }
 #endif
     if (mrb_string_p(val)) {
@@ -524,55 +495,9 @@ mrb_to_int(mrb_state *mrb, mrb_value val)
   return val;
 }
 
-MRB_API mrb_value
-mrb_convert_to_integer(mrb_state *mrb, mrb_value val, mrb_int base)
-{
-  mrb_value tmp;
-
-  if (mrb_nil_p(val)) {
-    if (base != 0) goto arg_error;
-    mrb_raise(mrb, E_TYPE_ERROR, "can't convert nil into Integer");
-  }
-  switch (mrb_type(val)) {
-#ifndef MRB_NO_FLOAT
-    case MRB_TT_FLOAT:
-      if (base != 0) goto arg_error;
-      return mrb_flo_to_fixnum(mrb, val);
-#endif
-
-    case MRB_TT_INTEGER:
-      if (base != 0) goto arg_error;
-      return val;
-
-    case MRB_TT_STRING:
-    string_conv:
-      return mrb_str_to_inum(mrb, val, base, TRUE);
-
-    default:
-      break;
-  }
-  if (base != 0) {
-    tmp = mrb_check_string_type(mrb, val);
-    if (!mrb_nil_p(tmp)) {
-      val = tmp;
-      goto string_conv;
-    }
-arg_error:
-    mrb_raise(mrb, E_ARGUMENT_ERROR, "base specified for non string value");
-  }
-  /* to raise TypeError */
-  return mrb_to_int(mrb, val);
-}
-
-MRB_API mrb_value
-mrb_Integer(mrb_state *mrb, mrb_value val)
-{
-  return mrb_convert_to_integer(mrb, val, 0);
-}
-
 #ifndef MRB_NO_FLOAT
 MRB_API mrb_value
-mrb_Float(mrb_state *mrb, mrb_value val)
+mrb_to_float(mrb_state *mrb, mrb_value val)
 {
   if (mrb_nil_p(val)) {
     mrb_raise(mrb, E_TYPE_ERROR, "can't convert nil into Float");
@@ -592,19 +517,6 @@ mrb_Float(mrb_state *mrb, mrb_value val)
   }
 }
 #endif
-
-MRB_API mrb_value
-mrb_to_str(mrb_state *mrb, mrb_value val)
-{
-  return mrb_ensure_string_type(mrb, val);
-}
-
-/* obsolete: use mrb_ensure_string_type() instead */
-MRB_API mrb_value
-mrb_string_type(mrb_state *mrb, mrb_value str)
-{
-  return mrb_ensure_string_type(mrb, str);
-}
 
 MRB_API mrb_value
 mrb_ensure_string_type(mrb_state *mrb, mrb_value str)

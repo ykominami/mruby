@@ -1,16 +1,16 @@
 # Authors of mruby (mruby developers)
 
-## The List of Contributors sorted by number of commits (as of 2021-04-12 ff2ffe3)
+## The List of Contributors sorted by number of commits (as of 2021-08-15 40c4c5d)
 
-   7340 Yukihiro "Matz" Matsumoto (@matz)*
-    576 KOBAYASHI Shuji (@shuujii)
+   7674 Yukihiro "Matz" Matsumoto (@matz)*
+    585 KOBAYASHI Shuji (@shuujii)
     376 Daniel Bovensiepen (@bovi)
     344 Takeshi Watanabe (@take-cheeze)*
     334 Masaki Muranaka (@monaka)
+    301 dearblue (@dearblue)*
     298 Tomoyuki Sahara (@tsahara)*
-    276 dearblue (@dearblue)*
     234 Jun Hiroe (@suzukaze)
-    217 Cremno (@cremno)*
+    219 Cremno (@cremno)*
     208 Yuki Kurihara (@ksss)+
     148 Yasuhiro Matsumoto (@mattn)*
     113 Carson McDonald (@carsonmcdonald)
@@ -26,6 +26,7 @@
      56 h2so5 (@h2so5)
      52 Ralph Desir (@Mav7)*
      45 Rory O'Connell (@RoryO)*
+     43 John Bampton (@jbampton)
      43 Yuichiro Kaneko (@yui-knk)+
      42 fleuria (@flaneur2020)
      40 Christopher Aue (@christopheraue)
@@ -35,22 +36,21 @@
      31 MATSUMOTO Ryosuke (@matsumotory)*
      30 Nobuyoshi Nakada (@nobu)
      28 Masayoshi Takahashi (@takahashim)+
-     26 John Bampton (@jbampton)
      24 Julian Aron Prenner (@furunkel)*
      24 Ryan Scott (@ryan-scott-dev)*
      22 Clayton Smith (@clayton-shopify)
      22 Zachary Scott (@zzak)*
+     22 mirichi (@mirichi)
      21 Jared Breeden (@jbreeden)*
-     20 mirichi (@mirichi)
+     20 Uchio Kondo (@udzura)*
      19 Bouke van der Bijl (@bouk)
      19 Felix Jones (@felixjones)*
      19 Hidetaka Takano (@TJ-Hidetaka-Takano)
-     19 Uchio Kondo (@udzura)*
      19 go kikuta (@gkta)*
      18 Corey Powell (@IceDragon200)
      18 Jon Maken (@jonforums)+
      18 Mitchell Blank Jr (@mitchblank)*
-     16 Ryan Lopopolo (@lopopolo)
+     17 Ryan Lopopolo (@lopopolo)
      16 bggd (@bggd)
      16 kano4 (@kano4)
      14 Blaž Hrastnik (@archseer)*
@@ -131,8 +131,8 @@
       3 J. Mutua (@katmutua)+
       3 Jan Berdajs (@mrbrdo)
       3 Joseph McCullough (@joequery)
+      3 Mark McCurry (@fundamental)
       3 Nobuhiro Iwamatsu (@iwamatsu)
-      3	Mark McCurry (@fundamental)
       3 Per Lundberg (@perlun)*
       3 Rob Fors (@robfors)*
       3 Rodrigo Malizia (@rmalizia44)+
@@ -197,6 +197,7 @@
       1 Benoit Daloze (@eregon)
       1 Daehyub Kim (@lateau)
       1 Daniel Varga (@vargad)
+      1 Dante Catalfamo (@dantecatalfamo)
       1 Edgar Boda-Majer (@eboda)
       1 Fangrui Song (@MaskRay)
       1 Flavio Medeiros (@flaviommedeiros)
@@ -238,6 +239,7 @@
       1 Megumi Tomita (@tomykaira)+
       1 Mitchell Hashimoto (@mitchellh)
       1 Mitsutaka Mimura (@takkanm)
+      1 Nathan Ladd (@ntl)
       1 Nicholas (@knf)
       1 Nozomi SATO (@nozomiS)
       1 Okumura Takahiro (@hfm)
@@ -286,6 +288,12 @@
 `*` - Entries unified according to names and addresses
 `+` - Entries with names different from commits
 
+## Contributors without named commits
+
+   Yuichi Osawa (Mitsubishi Electric Micro-Computer Application Software)
+   Shota Nakano (Manycolors)
+   Bjorn De Meyer
+
 ## Corporate contributors
 
    Ministry of Economy, Trade and Industry, Japan
@@ -297,9 +305,3 @@
    Specified non-profit organization mruby Forum
    Mitsubishi Electric Micro-Computer Application Software Co.,Ltd.
    Manycolors, Inc.
-
-## Contributors without named commits
-
-   Yuichi Osawa (Mitsubishi Electric Micro-Computer Application Software)
-   Shota Nakano (Manycolors)
-   Bjorn De Meyer

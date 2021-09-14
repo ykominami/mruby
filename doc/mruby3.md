@@ -1,5 +1,4 @@
-User visible changes in `mruby3`
-===
+# User visible changes in `mruby3`
 
 # Build System
 
@@ -77,8 +76,9 @@ to be default `mrb_value` representation. Now the default is
 
 Pack `mrb_value` in an `intptr_t` integer. Consumes less
 memory compared to `MRB_NO_BOXING` especially on 32-bit
-platforms. `Fixnum` size is 31 bits, so some integer values
-does not fit in `Fixnum` integers.
+platforms. Inlined integer size is 31 bits, so some `mrb_int`
+values does not fit in `mrb_value`. Those integers are allocated
+in the object heap as `struct RInteger`.
 
 ## `MRB_NAN_BOXING`
 
@@ -111,14 +111,9 @@ $ bin/mruby -r lib1.rb -r lib2.rb < app.mrb
 
 `mruby3` introduces a few new instructions.
 
-Instructions that access pool[i]/syms[i] where i>255.
+Instructions that load a 16/32-bit integer.
 
-* `OP_LOADL16`
-* `OP_STRING16`
-* `OP_LOADSYM16`
-
-Instructions that load a 32-bit integer.
-
+* `OP_LOADI16`
 * `OP_LOADI32`
 
 Instruction that unwinds jump table for rescue/ensure.

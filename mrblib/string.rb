@@ -42,32 +42,6 @@ class String
     self
   end
 
-  # private method for gsub/sub
-  def __sub_replace(pre, m, post)
-    s = ""
-    i = 0
-    while j = index("\\", i)
-      break if j == length-1
-      t = case self[j+1]
-          when "\\"
-            "\\"
-          when "`"
-            pre
-          when "&", "0"
-            m
-          when "'"
-            post
-          when "1", "2", "3", "4", "5", "6", "7", "8", "9"
-            ""
-          else
-            self[j, 2]
-          end
-      s += self[i, j-i] + t
-      i = j + 2
-    end
-    s + self[i, length-i]
-  end
-
   ##
   # Replace all matches of +pattern+ with +replacement+.
   # Call block (if given) for each match and replace
@@ -84,9 +58,6 @@ class String
     if args.length == 2 && block
       block = nil
     end
-    if !replace.nil? || !block
-      replace.__to_str
-    end
     offset = 0
     result = []
     while found = index(pattern, offset)
@@ -95,7 +66,7 @@ class String
       result << if block
         block.call(pattern).to_s
       else
-        replace.__sub_replace(self[0, found], pattern, self[offset..-1] || "")
+        self.__sub_replace(replace, pattern, found)
       end
       if plen == 0
         result << self[offset, 1]
@@ -144,25 +115,20 @@ class String
     end
 
     pattern, replace = *args
-    pattern.__to_str
     if args.length == 2 && block
       block = nil
     end
-    unless block
-      replace.__to_str
-    end
     result = []
-    this = dup
     found = index(pattern)
-    return this unless found
-    result << this[0, found]
+    return self.dup unless found
+    result << self[0, found]
     offset = found + pattern.length
     result << if block
       block.call(pattern).to_s
     else
-      replace.__sub_replace(this[0, found], pattern, this[offset..-1] || "")
+      self.__sub_replace(replace, pattern, found)
     end
-    result << this[offset..-1] if offset < length
+    result << self[offset..-1] if offset < length
     result.join
   end
 

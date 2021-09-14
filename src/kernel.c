@@ -84,8 +84,8 @@ mrb_equal_m(mrb_state *mrb, mrb_value self)
  *  Document-method: object_id
  *
  *  call-seq:
- *     obj.__id__       -> fixnum
- *     obj.object_id    -> fixnum
+ *     obj.__id__       -> int
+ *     obj.object_id    -> int
  *
  *  Returns an integer identifier for <i>obj</i>. The same number will
  *  be returned on all calls to <code>id</code> for a given object, and
@@ -293,7 +293,7 @@ mrb_obj_frozen(mrb_state *mrb, mrb_value self)
 /* 15.3.1.3.15 */
 /*
  *  call-seq:
- *     obj.hash    -> fixnum
+ *     obj.hash    -> int
  *
  *  Generates a <code>Integer</code> hash value for this object. This
  *  function must have the property that <code>a.eql?(b)</code> implies
@@ -423,8 +423,8 @@ mrb_f_raise(mrb_state *mrb, mrb_value self)
   mrb_value a[2], exc;
   mrb_int argc;
 
-
   argc = mrb_get_args(mrb, "|oo", &a[0], &a[1]);
+  mrb->c->ci->mid = 0;
   switch (argc) {
   case 0:
     mrb_raise(mrb, E_RUNTIME_ERROR, "");
@@ -527,6 +527,7 @@ mrb_obj_missing(mrb_state *mrb, mrb_value mod)
   const mrb_value *a;
   mrb_int alen;
 
+  mrb->c->ci->mid = 0;
   mrb_get_args(mrb, "n*!", &name, &a, &alen);
   mrb_method_missing(mrb, name, mod, mrb_ary_new_from_values(mrb, alen, a));
   /* not reached */
@@ -584,6 +585,7 @@ mrb_obj_ceqq(mrb_state *mrb, mrb_value self)
   mrb_sym eqq = MRB_OPSYM(eqq);
   mrb_value ary;
 
+  mrb->c->ci->mid = 0;
   if (mrb_array_p(self)) {
     ary = self;
   }
@@ -649,8 +651,7 @@ mrb_init_kernel(mrb_state *mrb)
   mrb_define_method(mrb, krn, "respond_to?",                obj_respond_to,                  MRB_ARGS_ARG(1,1));     /* 15.3.1.3.43 */
   mrb_define_method(mrb, krn, "to_s",                       mrb_any_to_s,                    MRB_ARGS_NONE());    /* 15.3.1.3.46 */
   mrb_define_method(mrb, krn, "__case_eqq",                 mrb_obj_ceqq,                    MRB_ARGS_REQ(1));    /* internal */
-  mrb_define_method(mrb, krn, "__to_int",                   mrb_to_int,                      MRB_ARGS_NONE()); /* internal */
-  mrb_define_method(mrb, krn, "__to_str",                   mrb_to_str,                      MRB_ARGS_NONE()); /* internal */
+  mrb_define_method(mrb, krn, "__to_int",                   mrb_to_integer,                  MRB_ARGS_NONE()); /* internal */
 
   mrb_include_module(mrb, mrb->object_class, mrb->kernel_module);
 }

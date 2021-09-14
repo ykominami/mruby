@@ -15,7 +15,7 @@ mrb_data_object_alloc(mrb_state *mrb, struct RClass *klass, void *ptr, const mrb
 {
   struct RData *data;
 
-  data = (struct RData*)mrb_obj_alloc(mrb, MRB_TT_DATA, klass);
+  data = MRB_OBJ_ALLOC(mrb, MRB_TT_DATA, klass);
   data->data = ptr;
   data->type = type;
 
@@ -158,11 +158,35 @@ mrb_word_boxing_float_value(mrb_state *mrb, mrb_float f)
 {
   union mrb_value_ v;
 
+#ifdef MRB_WORDBOX_USE_HEAP_FLOAT
   v.p = mrb_obj_alloc(mrb, MRB_TT_FLOAT, mrb->float_class);
   v.fp->f = f;
   MRB_SET_FROZEN_FLAG(v.bp);
+#elif defined(MRB_64BIT) && defined(MRB_USE_FLOAT32)
+  v.w = 0;
+  v.f = f;
+  v.w = ((v.w<<2) & ~3) | 2;
+#else
+  v.f = f;
+  v.w = (v.w & ~3) | 2;
+#endif
   return v.value;
 }
+
+
+#ifndef MRB_WORDBOX_USE_HEAP_FLOAT
+MRB_API mrb_float
+mrb_word_boxing_value_float(mrb_value v)
+{
+  union mrb_value_ u;
+  u.value = v;
+  u.w = u.w & ~3;
+#if defined(MRB_64BIT) && defined(MRB_USE_FLOAT32)
+  u.w >>= 2;
+#endif
+  return u.f;
+}
+#endif
 #endif  /* MRB_NO_FLOAT */
 
 MRB_API mrb_value
@@ -185,7 +209,7 @@ MRB_API mrb_value
 mrb_xxx_boxing_cptr_value(mrb_state *mrb, void *p)
 {
   mrb_value v;
-  struct RCptr *cptr = (struct RCptr*)mrb_obj_alloc(mrb, MRB_TT_CPTR, mrb->object_class);
+  struct RCptr *cptr = MRB_OBJ_ALLOC(mrb, MRB_TT_CPTR, mrb->object_class);
 
   SET_OBJ_VALUE(v, cptr);
   cptr->p = p;

@@ -7,7 +7,7 @@
 #include "mruby/presym.h"
 
 mrb_noreturn void mrb_method_missing(mrb_state *mrb, mrb_sym name, mrb_value self, mrb_value args);
-mrb_value mrb_exec_irep(mrb_state *mrb, mrb_value self, struct RProc *p, mrb_func_t posthook);
+mrb_value mrb_exec_irep(mrb_state *mrb, mrb_value self, struct RProc *p);
 
 static mrb_value
 args_shift(mrb_state *mrb)
@@ -81,7 +81,7 @@ method_missing_prepare(mrb_state *mrb, mrb_sym *mid, mrb_value recv, struct RCla
 static struct RObject *
 method_object_alloc(mrb_state *mrb, struct RClass *mclass)
 {
-  return (struct RObject*)mrb_obj_alloc(mrb, MRB_TT_OBJECT, mclass);
+  return MRB_OBJ_ALLOC(mrb, MRB_TT_OBJECT, mclass);
 }
 
 static struct RProc*
@@ -242,7 +242,7 @@ mcall(mrb_state *mrb, mrb_value self, mrb_value recv)
   mrb->c->ci->mid = mid;
   mrb->c->ci->u.target_class = tc;
 
-  return mrb_exec_irep(mrb, recv, proc, NULL);
+  return mrb_exec_irep(mrb, recv, proc);
 }
 
 static mrb_value

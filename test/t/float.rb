@@ -277,8 +277,6 @@ assert('Float#to_s') do
   assert_equal("-1.0e-10", -0.0000000001.to_s)
   assert_equal("1.0e+20", 1e20.to_s)
   assert_equal("-1.0e+20", -1e20.to_s)
-  assert_equal("1.0e+16", 10000000000000000.0.to_s)
-  assert_equal("-1.0e+16", -10000000000000000.0.to_s)
   assert_equal("100000.0", 100000.0.to_s)
   assert_equal("-100000.0", -100000.0.to_s)
   if uses_float
@@ -303,6 +301,18 @@ assert('Float#eql?') do
   assert_operator(5.0, :eql?, 5.0)
   assert_not_operator(5.0, :eql?, 5)
   assert_not_operator(5.0, :eql?, "5.0")
+end
+
+assert('Float#abs') do
+  f = 1.0
+  assert_equal(1.0, f.abs)
+  f = -1.0
+  assert_equal(1.0, f.abs)
+  f = 0.0
+  assert_equal(0.0, f.abs)
+  # abs(negative zero) should be positive zero
+  f = -0.0
+  assert_equal(0.0, f.abs)
 end
 
 end # const_defined?(:Float)

@@ -24,16 +24,16 @@ binding_extract_pc(mrb_state *mrb, mrb_value binding)
   }
 }
 
-static const struct RProc *
-binding_extract_proc(mrb_state *mrb, mrb_value binding)
+const struct RProc *
+mrb_binding_extract_proc(mrb_state *mrb, mrb_value binding)
 {
   mrb_value obj = mrb_iv_get(mrb, binding, MRB_SYM(proc));
   mrb_check_type(mrb, obj, MRB_TT_PROC);
   return mrb_proc_ptr(obj);
 }
 
-static struct REnv *
-binding_extract_env(mrb_state *mrb, mrb_value binding)
+struct REnv *
+mrb_binding_extract_env(mrb_state *mrb, mrb_value binding)
 {
   mrb_value obj = mrb_iv_get(mrb, binding, MRB_SYM(env));
   if (mrb_nil_p(obj)) {
@@ -108,8 +108,8 @@ binding_local_variable_defined_p(mrb_state *mrb, mrb_value self)
   mrb_sym varname;
   mrb_get_args(mrb, "n", &varname);
 
-  const struct RProc *proc = binding_extract_proc(mrb, self);
-  struct REnv *env = binding_extract_env(mrb, self);
+  const struct RProc *proc = mrb_binding_extract_proc(mrb, self);
+  struct REnv *env = mrb_binding_extract_env(mrb, self);
   mrb_value *e = binding_local_variable_search(mrb, proc, env, varname);
   if (e) {
     return mrb_true_value();
@@ -129,8 +129,8 @@ binding_local_variable_get(mrb_state *mrb, mrb_value self)
   mrb_sym varname;
   mrb_get_args(mrb, "n", &varname);
 
-  const struct RProc *proc = binding_extract_proc(mrb, self);
-  struct REnv *env = binding_extract_env(mrb, self);
+  const struct RProc *proc = mrb_binding_extract_proc(mrb, self);
+  struct REnv *env = mrb_binding_extract_env(mrb, self);
   mrb_value *e = binding_local_variable_search(mrb, proc, env, varname);
   if (!e) {
     mrb_raisef(mrb, E_NAME_ERROR, "local variable %!n is not defined", varname);
@@ -146,11 +146,14 @@ binding_local_variable_set(mrb_state *mrb, mrb_value self)
   mrb_value obj;
   mrb_get_args(mrb, "no", &varname, &obj);
 
-  const struct RProc *proc = binding_extract_proc(mrb, self);
-  struct REnv *env = binding_extract_env(mrb, self);
+  const struct RProc *proc = mrb_binding_extract_proc(mrb, self);
+  struct REnv *env = mrb_binding_extract_env(mrb, self);
   mrb_value *e = binding_local_variable_search(mrb, proc, env, varname);
   if (e) {
     *e = obj;
+    if (!mrb_immediate_p(obj)) {
+      mrb_field_write_barrier(mrb, (struct RBasic*)env, (struct RBasic*)mrb_obj_ptr(obj));
+    }
   }
   else {
     mrb_proc_merge_lvar(mrb, (mrb_irep*)proc->body.irep, env, 1, &varname, &obj);
@@ -184,7 +187,7 @@ binding_source_location(mrb_state *mrb, mrb_value self)
   }
 
   mrb_value srcloc;
-  const struct RProc *proc = binding_extract_proc(mrb, self);
+  const struct RProc *proc = mrb_binding_extract_proc(mrb, self);
   if (!proc || MRB_PROC_CFUNC_P(proc) ||
       !proc->upper || MRB_PROC_CFUNC_P(proc->upper)) {
     srcloc = mrb_nil_value();
@@ -217,7 +220,7 @@ binding_source_location(mrb_state *mrb, mrb_value self)
 mrb_value
 mrb_binding_alloc(mrb_state *mrb)
 {
-  struct RObject *obj = (struct RObject*)mrb_obj_alloc(mrb, MRB_TT_OBJECT, mrb_class_get_id(mrb, MRB_SYM(Binding)));
+  struct RObject *obj = MRB_OBJ_ALLOC(mrb, MRB_TT_OBJECT, mrb_class_get_id(mrb, MRB_SYM(Binding)));
   return mrb_obj_value(obj);
 }
 
@@ -231,7 +234,7 @@ mrb_binding_wrap_lvspace(mrb_state *mrb, const struct RProc *proc, struct REnv *
 
   static const mrb_code iseq_dummy[] = { OP_RETURN, 0 };
 
-  struct RProc *lvspace = (struct RProc*)mrb_obj_alloc(mrb, MRB_TT_PROC, mrb->proc_class);
+  struct RProc *lvspace = MRB_OBJ_ALLOC(mrb, MRB_TT_PROC, mrb->proc_class);
   mrb_irep *irep = mrb_add_irep(mrb);
   irep->flags = MRB_ISEQ_NO_FREE;
   irep->iseq = iseq_dummy;
@@ -246,7 +249,7 @@ mrb_binding_wrap_lvspace(mrb_state *mrb, const struct RProc *proc, struct REnv *
     lvspace->flags |= MRB_PROC_ENVSET;
   }
 
-  *envp = (struct REnv*)mrb_obj_alloc(mrb, MRB_TT_ENV, NULL);
+  *envp = MRB_OBJ_ALLOC(mrb, MRB_TT_ENV, NULL);
   (*envp)->stack = (mrb_value*)mrb_calloc(mrb, 1, sizeof(mrb_value));
   (*envp)->stack[0] = lvspace->e.env ? lvspace->e.env->stack[0] : mrb_nil_value();
   (*envp)->cxt = lvspace->e.env ? lvspace->e.env->cxt : mrb->c;
