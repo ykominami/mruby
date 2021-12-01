@@ -1,0 +1,338 @@
+commit 6db84c595d245c4dd64f9e4aa93cbc62f4ea5e09
+Author: yasuo kominami <ykominami@gmail.com>
+Date:   Thu Jul 29 05:15:30 2021 +0900
+
+    make being able to invoke windows program in cygwin
+
+diff --git a/Rakefile b/Rakefile
+old mode 100644
+new mode 100755
+index 227d1d5d5..dea0f2959
+--- a/Rakefile
++++ b/Rakefile
+@@ -4,6 +4,17 @@
+ MRUBY_ROOT = File.dirname(File.expand_path(__FILE__))
+ MRUBY_BUILD_HOST_IS_CYGWIN = RUBY_PLATFORM.include?('cygwin')
+ MRUBY_BUILD_HOST_IS_OPENBSD = RUBY_PLATFORM.include?('openbsd')
++MRUBY_BUILD_HOST_IS_MSWIN32 = RUBY_PLATFORM.include?('mswin32')
++MRUBY_BUILD_HOST_IS_MINGW32_IN_MSYSTEM = false
++if RUBY_PLATFORM.include?('mingw32')
++  if ENV['MSYSTEM']
++    MRUBY_BUILD_HOST_IS_MINGW32_IN_MSYSTEM = true
++    MRUBY_BUILD_HOST_IS_MINGW32 = false
++  else
++    MRUBY_BUILD_HOST_IS_MINGW32_IN_MSYSTEM = false
++    MRUBY_BUILD_HOST_IS_MINGW32 = true
++  end
++end
+ 
+ Rake.verbose(false) if Rake.verbose == Rake::DSL::DEFAULT
+ 
+diff --git a/build_config.rb b/build_config.rb
+old mode 100644
+new mode 100755
+index 625661df0..b5677f2d1
+--- a/build_config.rb
++++ b/build_config.rb
+@@ -1,3 +1,4 @@
++<<<<<<< HEAD
+ # The default build configuration file was moved to `build_config/default.rb`.
+ #
+ # Recommended way to customize the build configuration is:
+diff --git a/build_config/cross-bare-arm.rb b/build_config/cross-bare-arm.rb
+new file mode 100644
+index 000000000..db08df248
+--- /dev/null
++++ b/build_config/cross-bare-arm.rb
+@@ -0,0 +1,106 @@
++MRuby::CrossBuild.new('ARM') do |conf|
++#  conf.convert_mode = :CYGWIN_TO_WIN_WITH_ESCAPE
++
++  toolchain :gcc
++  conf.cc.defines = %w(DISABLE_STDIO)
++  conf.bins = []
++
++  [conf.cc, conf.objc, conf.asm].each do |cc|
++    cc.command_requirement = :WINDOWS_STYLE_PATH
++    cc.command = ENV['CC'] || 'arm-none-eabi-gcc'
++    cc.flags = [ENV['CFLAGS'] || %w(-g -std=gnu99 -O3 -Wall -Werror-implicit-function-declaration)]
++    cc.include_paths = ["#{MRUBY_ROOT}/include"],
++
++    cc.defines = %w(DISABLE_GEMS)
++    cc.option_include_path = '-I%s'
++    cc.option_define = '-D%s'
++    cc.compile_options = '%{flags} -MMD -o %{outfile} -c %{infile}'
++  end
++
++  [conf.cxx].each do |cxx|
++    cxx.command_requirement = :WINDOWS_STYLE_PATH
++    cxx.command = ENV['CXX'] || 'arm-none-eabi-g++'
++    cxx.flags = [ENV['CXXFLAGS'] || ENV['CFLAGS'] || %w(-g -O3 -Wall -Werror-implicit-function-declaration)]
++    cxx.include_paths = ["#{MRUBY_ROOT}/include"]
++    cxx.defines = %w(DISABLE_GEMS)
++    cxx.option_include_path = '-I%s'
++    cxx.option_define = '-D%s'
++    cxx.compile_options = '%{flags} -MMD -o %{outfile} -c %{infile}'
++  end
++
++  conf.linker do |linker|
++    linker.command_requirement = :WINDOWS_STYLE_PATH
++    linker.command = ENV['LD'] || 'arm-none-eabi-gcc'
++    linker.flags = [ENV['LDFLAGS'] || %w()]
++    linker.libraries = %w(m)
++    linker.library_paths = []
++    linker.option_library = '-l%s'
++    linker.option_library_path = '-L%s'
++    linker.link_options = '%{flags} -o %{outfile} %{objs} %{flags_before_libraries} %{libs} %{flags_after_libraries}'
++  end
++
++  # Archiver settings
++  conf.archiver do |archiver|
++    archiver.command_requirement = :WINDOWS_STYLE_PATH
++    archiver.command = ENV['AR'] || 'arm-none-eabi-ar'
++  end
++  #
++  #   conf.cc.flags << "-m32"
++  #   conf.linker.flags << "-m32"
++    #
++  # Use standard print/puts/p
++  conf.gem :core => "mruby-print"
++  # Use extended toplevel object (main) methods
++  conf.gem :core => "mruby-toplevel-ext"
++  # Use standard Math module
++  #  conf.gem :core => "mruby-math"
++  # Use mruby-compiler to build other mrbgems
++  conf.gem :core => "mruby-compiler"
++  conf.gem :core => "mruby-array-ext"
++  conf.build_mrbtest_lib_only
++=begin
++  # Use standard Kernel#sprintf method
++  conf.gem :core => "mruby-sprintf"
++  # Use standard Time class
++  # conf.gem :core => "mruby-time"
++  # Use standard Struct class
++  conf.gem :core => "mruby-struct"
++  # Use extensional Enumerable module
++  conf.gem :core => "mruby-enum-ext"
++  # Use extensional String class
++  #conf.gem :core => "mruby-string-ext"
++  # Use extensional Numeric class
++  conf.gem :core => "mruby-numeric-ext"
++  # Use extensional Array class
++  conf.gem :core => "mruby-array-ext"
++  # Use extensional Hash class
++  conf.gem :core => "mruby-hash-ext"
++  # Use extensional Range class
++  conf.gem :core => "mruby-range-ext"
++  # Use extensional Proc class
++  conf.gem :core => "mruby-proc-ext"
++  # Use extensional Symbol class
++  conf.gem :core => "mruby-symbol-ext"
++  # Use Random class
++  # conf.gem :core => "mruby-random"
++  # Use extensional Object class
++  conf.gem :core => "mruby-object-ext"
++  # Use ObjectSpace class
++  conf.gem :core => "mruby-objectspace"
++  # Use Fiber class
++  conf.gem :core => "mruby-fiber"
++  # Use Enumerator class (require mruby-fiber)
++  conf.gem :core => "mruby-enumerator"
++  # Use Enumerable::Lazy classlin (require mruby-enumerator)
++  conf.gem :core => "mruby-enum-lazy"
++  # Generate mirb command
++  # conf.gem :core => "mruby-bin-mirb"
++  # Generate mruby command
++  # conf.gem :core => "mruby-bin-mruby"
++  # Generate mruby-strip command
++  # conf.gem :core => "mruby-bin-strip"
++=end
++  #conf.gem :core => "mruby-tecs"
++  #conf.gem :core => "mruby-bin-mruby"
++  #conf.gem :core => "mruby-ev3-motor"
++end
+diff --git a/lib/mruby/build.rb b/lib/mruby/build.rb
+old mode 100644
+new mode 100755
+index 67267ab46..fa0ac41a3
+--- a/lib/mruby/build.rb
++++ b/lib/mruby/build.rb
+@@ -2,6 +2,8 @@ require "mruby/core_ext"
+ require "mruby/build/load_gems"
+ require "mruby/build/command"
+ 
++require 'shellwords'
++
+ module MRuby
+   autoload :Gem, "mruby/gem"
+   autoload :Lockfile, "mruby/lockfile"
+@@ -382,6 +384,21 @@ EOS
+       end
+     end
+ 
++    def to_path(mode, name)
++      if name.is_a?(Array)
++        name.flatten.map { |n| to_path(mode, n) }
++      else
++        case mode
++        when :CYGWIN_TO_WIN_WITH_ESCAPE
++          Shellwords.escape(`cygpath -w "#{filename(name)}"`.strip)
++        when :CYGWIN_TO_WIN
++          `cygpath -w "#{filename(name)}"`.strip
++        else
++          filename(name)
++        end
++      end
++    end
++
+     def exefile(name)
+       if name.is_a?(Array)
+         name.flatten.map { |n| exefile(n) }
+diff --git a/lib/mruby/build/command.rb b/lib/mruby/build/command.rb
+old mode 100644
+new mode 100755
+index c93d08ea7..59938c3f7
+--- a/lib/mruby/build/command.rb
++++ b/lib/mruby/build/command.rb
+@@ -4,8 +4,9 @@ module MRuby
+   class Command
+     include Rake::DSL
+     extend Forwardable
+-    def_delegators :@build, :filename, :objfile, :libfile, :exefile
++    def_delegators :@build, :filename, :objfile, :libfile, :exefile, :to_path
+     attr_accessor :build, :command
++    attr_reader :convert_mode
+ 
+     def initialize(build)
+       @build = build
+@@ -32,8 +33,40 @@ module MRuby
+       end
+     end
+ 
++    def command_requirement
++      @command_requirement
++    end
++
++    def command_requirement=(value = nil)
++      @command_requirement = value
++      @convert_mode = determine_convert_mode(@command_requirement)
++    end
++
++    def determine_convert_mode(command_requirement = nil)
++      case command_requirement
++      when :WINDOWS_STYLE_PATH
++        if MRUBY_BUILD_HOST_IS_CYGWIN
++          :CYGWIN_TO_WIN_WITH_ESCAPE
++        elsif MRUBY_BUILD_HOST_IS_MINGW32_IN_MSYSTEM
++          :CYGWIN_TO_WIN_WITH_ESCAPE
++        else
++          nil
++        end
++      else
++        nil
++      end
++    end
++
++    def path(name)
++      to_path(@convert_mode, name)
++    end
++
++    NotFoundCommands = {}
++
+     private
++
+     def _run(options, params={})
++      puts "#{build.filename(command)} #{options % params}" if Rake.verbose
+       sh "#{build.filename(command)} #{options % params}"
+     end
+   end
+@@ -79,7 +112,7 @@ module MRuby
+     def all_flags(_defines=[], _include_paths=[], _flags=[])
+       define_flags = [defines, _defines, build.defines].flatten.map{ |d| option_define % d }
+       include_path_flags = [include_paths, _include_paths].flatten.map do |f|
+-        option_include_path % filename(f)
++        option_include_path % path(f)
+       end
+       [flags, define_flags, include_path_flags, _flags].flatten.join(' ')
+     end
+@@ -96,7 +129,7 @@ module MRuby
+         flags << " -DMRB_PRESYM_SCANNING"
+       end
+       _pp label, infile.relative_path, outfile.relative_path
+-      _run opts, flags: flags, infile: filename(infile), outfile: filename(outfile)
++      _run opts, flags: flags, infile: path(infile), outfile: path(outfile)
+     end
+ 
+     def define_rules(build_dir, source_dir='', out_ext=build.exts.object)
+@@ -196,7 +229,7 @@ module MRuby
+ 
+     def all_flags(_library_paths=[], _flags=[])
+       library_path_flags = [library_paths, _library_paths].flatten.map do |f|
+-        option_library_path % filename(f)
++        option_library_path % path(f)
+       end
+       [flags, library_path_flags, _flags].flatten.join(' ')
+     end
+@@ -215,7 +248,7 @@ module MRuby
+ 
+       _pp "LD", outfile.relative_path
+       _run link_options, { :flags => all_flags(_library_paths, _flags),
+-                            :outfile => filename(outfile) , :objs => filename(objfiles).map{|f| %Q["#{f}"]}.join(' '),
++                            :outfile => path(outfile) , :objs => path(objfiles).map{|f| %Q["#{f}"]}.join(' '),
+                             :flags_before_libraries => [flags_before_libraries, _flags_before_libraries].flatten.join(' '),
+                             :flags_after_libraries => [flags_after_libraries, _flags_after_libraries].flatten.join(' '),
+                             :libs => library_flags.join(' ') }
+@@ -234,7 +267,7 @@ module MRuby
+     def run(outfile, objfiles)
+       mkdir_p File.dirname(outfile)
+       _pp "AR", outfile.relative_path
+-      _run archive_options, { :outfile => filename(outfile), :objs => filename(objfiles).map{|f| %Q["#{f}"]}.join(' ') }
++      _run archive_options, { :outfile => path(outfile), :objs => path(objfiles).map{|f| %Q["#{f}"]}.join(' ') }
+     end
+   end
+ 
+@@ -250,7 +283,7 @@ module MRuby
+     def run(outfile, infile)
+       mkdir_p File.dirname(outfile)
+       _pp "YACC", infile.relative_path, outfile.relative_path
+-      _run compile_options, { :outfile => filename(outfile) , :infile => filename(infile) }
++      _run compile_options, { :outfile => path(outfile) , :infile => path(infile) }
+     end
+   end
+ 
+@@ -266,7 +299,7 @@ module MRuby
+     def run(outfile, infile)
+       mkdir_p File.dirname(outfile)
+       _pp "GPERF", infile.relative_path, outfile.relative_path
+-      _run compile_options, { :outfile => filename(outfile) , :infile => filename(infile) }
++      _run compile_options, { :outfile => path(outfile) , :infile => path(infile) }
+     end
+   end
+ 
+@@ -287,7 +320,7 @@ module MRuby
+ 
+     def run_clone(dir, url, _flags = [])
+       _pp "GIT", url, dir.relative_path
+-      _run clone_options, { :flags => [flags, _flags].flatten.join(' '), :url => shellquote(url), :dir => shellquote(filename(dir)) }
++      _run clone_options, { :flags => [flags, _flags].flatten.join(' '), :url => shellquote(url), :dir => shellquote(path(dir)) }
+     end
+ 
+     def run_pull(dir, url)
+@@ -337,7 +370,7 @@ module MRuby
+       opt = @compile_options % {funcname: funcname}
+       opt << " -S" if cdump
+       opt << " -s" if static
+-      cmd = %["#{filename @command}" #{opt} #{filename(infiles).map{|f| %["#{f}"]}.join(' ')}]
++      cmd = %["#{filename @command}" #{opt} #{path(infiles).map{|f| %["#{f}"]}.join(' ')}]
+       puts cmd if Rake.verbose
+       IO.popen(cmd, 'r+') do |io|
+         out.puts io.read
+@@ -365,7 +398,7 @@ module MRuby
+ 
+     def run(testbinfile)
+       puts "TEST for " + @build.name
+-      _run runner_options, { :flags => [flags, verbose_flag].flatten.join(' '), :infile => testbinfile }
++      _run runner_options, { :flags => [flags, verbose_flag].flatten.join(' '), :infile => path(testbinfile) }
+     end
+   end
+ 
