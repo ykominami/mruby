@@ -30,7 +30,7 @@ end
 
 `ZeroDivisionError` is raised.
 
-#### mruby [3.0.0 (2021-03-05)]
+#### mruby [3.1.0 (2022-05-12)]
 
 `RuntimeError` is raised instead of `ZeroDivisionError`. To re-raise the exception, you have to do:
 
@@ -66,7 +66,7 @@ p Liste.new "foobar"
 
 ` [] `
 
-#### mruby [3.0.0 (2021-03-05)]
+#### mruby [3.1.0 (2022-05-12)]
 
 `ArgumentError` is raised.
 
@@ -96,7 +96,7 @@ false
 true
 ```
 
-#### mruby [3.0.0 (2021-03-05)]
+#### mruby [3.1.0 (2022-05-12)]
 
 ```
 true
@@ -133,7 +133,7 @@ p 'ok'
 ok
 ```
 
-#### mruby [3.0.0 (2021-03-05)]
+#### mruby [3.1.0 (2022-05-12)]
 
 ```
 test.rb:8: undefined method 'test_func' (NoMethodError)
@@ -155,7 +155,7 @@ defined?(Foo)
 nil
 ```
 
-#### mruby [3.0.0 (2021-03-05)]
+#### mruby [3.1.0 (2022-05-12)]
 
 `NameError` is raised.
 
@@ -172,7 +172,7 @@ alias $a $__a__
 
 ` nil `
 
-#### mruby [3.0.0 (2021-03-05)]
+#### mruby [3.1.0 (2022-05-12)]
 
 Syntax error
 
@@ -194,12 +194,12 @@ end
 `ArgumentError` is raised.
 The re-defined `+` operator does not accept any arguments.
 
-#### mruby [3.0.0 (2021-03-05)]
+#### mruby [3.1.0 (2022-05-12)]
 
 ` 'ab' `
 Behavior of the operator wasn't changed.
 
-## `Kernel#binding` is not supported
+## `Kernel#binding` is not supported until [3.0.0 (2021-03-05)]
 
 `Kernel#binding` method is not supported.
 
@@ -219,26 +219,11 @@ trace (most recent call last):
 -e:1: undefined method 'binding' (NoMethodError)
 ```
 
-## Keyword arguments
+#### mruby [3.1.0 (2022-05-12)]
 
-mruby keyword arguments behave slightly different from CRuby 2.5
-to make the behavior simpler and less confusing.
+`binding` has been supported since 3.1.0.
 
-#### Ruby [ruby 2.5.1p57 (2018-03-29 revision 63029)]
-
-```
-$ ruby -e 'def m(*r,**k) p [r,k] end; m("a"=>1,:b=>2)'
-[[{"a"=>1}], {:b=>2}]
-```
-
-#### mruby [3.0.0 (2021-03-05)]
-
-```
-$ ./bin/mruby -e 'def m(*r,**k) p [r,k] end; m("a"=>1,:b=>2)'
-trace (most recent call last):
-	[0] -e:1
--e:1: keyword argument hash with non symbol keys (ArgumentError)
-```
+See also [mrbgems/mruby-binding](https://github.com/mruby/mruby/tree/master/mrbgems/mruby-binding) and [mrbgems/mruby-binding-core](https://github.com/mruby/mruby/tree/master/mrbgems/mruby-binding-core).
 
 ## `nil?` redefinition in conditional expressions
 

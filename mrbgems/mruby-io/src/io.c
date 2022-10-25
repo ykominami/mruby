@@ -11,6 +11,7 @@
 #include "mruby/variable.h"
 #include "mruby/ext/io.h"
 #include "mruby/error.h"
+#include "mruby/internal.h"
 #include "mruby/presym.h"
 
 #include <sys/types.h>
@@ -34,12 +35,6 @@
   typedef long fsuseconds_t;
   typedef int fmode_t;
   typedef int mrb_io_read_write_size;
-  #ifndef MRB_MINGW32_LEGACY
-    #if !defined(_SSIZE_T_) && !defined(_SSIZE_T_DEFINED) && \
-        !defined(__have_typedef_ssize_t)
-    typedef SSIZE_T ssize_t;
-    #endif
-  #endif
 
   #ifndef O_TMPFILE
     #define O_TMPFILE O_TEMPORARY
@@ -76,12 +71,11 @@ static void mrb_io_free(mrb_state *mrb, void *ptr);
 struct mrb_data_type mrb_io_type = { "IO", mrb_io_free };
 
 
-static struct mrb_io *io_get_open_fptr(mrb_state *mrb, mrb_value self);
 static int mrb_io_modestr_to_flags(mrb_state *mrb, const char *modestr);
 static int mrb_io_mode_to_flags(mrb_state *mrb, mrb_value mode);
 static void fptr_finalize(mrb_state *mrb, struct mrb_io *fptr, int quiet);
 
-static struct mrb_io *
+static struct mrb_io*
 io_get_open_fptr(mrb_state *mrb, mrb_value self)
 {
   struct mrb_io *fptr;
@@ -363,7 +357,7 @@ mrb_io_s_popen_args(mrb_state *mrb, mrb_value klass,
     NULL,
   };
 
-  mrb_get_args(mrb, "z|o:", cmd, &mode, &kw);
+  mrb_get_args(mrb, "zo:", cmd, &mode, &kw);
 
   *flags = mrb_io_mode_to_flags(mrb, mode);
   *doexec = (strcmp("-", *cmd) != 0);
@@ -397,6 +391,7 @@ mrb_io_s_popen(mrb_state *mrb, mrb_value klass)
   ofd[0] = INVALID_HANDLE_VALUE;
   ofd[1] = INVALID_HANDLE_VALUE;
 
+  mrb->c->ci->mid = 0;
   io = mrb_io_s_popen_args(mrb, klass, &cmd, &flags, &doexec,
                            &opt_in, &opt_out, &opt_err);
 
@@ -476,6 +471,7 @@ mrb_io_s_popen(mrb_state *mrb, mrb_value klass)
   int pw[2] = { -1, -1 };
   int saved_errno;
 
+  mrb->c->ci->mid = 0;
   io = mrb_io_s_popen_args(mrb, klass, &cmd, &flags, &doexec,
                            &opt_in, &opt_out, &opt_err);
 
@@ -799,14 +795,31 @@ fptr_finalize(mrb_state *mrb, struct mrb_io *fptr, int quiet)
   }
 }
 
+static struct mrb_io*
+io_get_read_fptr(mrb_state *mrb, mrb_value self)
+{
+  struct mrb_io *fptr = io_get_open_fptr(mrb, self);
+  if (!fptr->readable) {
+    mrb_raise(mrb, E_IO_ERROR, "not opened for reading");
+  }
+  return fptr;
+}
+
 static mrb_value
 mrb_io_check_readable(mrb_state *mrb, mrb_value self)
 {
-  struct mrb_io *fptr = io_get_open_fptr(mrb, self);
-  if (! fptr->readable) {
-    mrb_raise(mrb, E_IO_ERROR, "not opened for reading");
-  }
+  io_get_read_fptr(mrb, self);
   return mrb_nil_value();
+}
+
+static struct mrb_io*
+io_get_write_fptr(mrb_state *mrb, mrb_value self)
+{
+  struct mrb_io *fptr = io_get_open_fptr(mrb, self);
+  if (!fptr->writable) {
+    mrb_raise(mrb, E_IO_ERROR, "not opened for writing");
+  }
+  return fptr;
 }
 
 static mrb_value
@@ -837,6 +850,7 @@ static mrb_value
 mrb_io_s_sysclose(mrb_state *mrb, mrb_value klass)
 {
   mrb_int fd;
+  mrb->c->ci->mid = 0;
   mrb_get_args(mrb, "i", &fd);
   if (close((int)fd) == -1) {
     mrb_sys_fail(mrb, "close");
@@ -946,10 +960,7 @@ mrb_io_sysread_common(mrb_state *mrb,
     mrb_str_modify(mrb, RSTRING(buf));
   }
 
-  fptr = (struct mrb_io *)io_get_open_fptr(mrb, io);
-  if (!fptr->readable) {
-    mrb_raise(mrb, E_IO_ERROR, "not opened for reading");
-  }
+  fptr = io_get_read_fptr(mrb, io);
   ret = readfunc(fptr->fd, RSTRING_PTR(buf), (fsize_t)maxlen, offset);
   if (ret < 0) {
     mrb_sys_fail(mrb, "sysread failed");
@@ -999,11 +1010,7 @@ mrb_io_syswrite_common(mrb_state *mrb,
   struct mrb_io *fptr;
   int fd, length;
 
-  fptr = io_get_open_fptr(mrb, io);
-  if (! fptr->writable) {
-    mrb_raise(mrb, E_IO_ERROR, "not opened for writing");
-  }
-
+  fptr = io_get_write_fptr(mrb, io);
   if (fptr->fd2 == -1) {
     fd = fptr->fd;
   } else {
@@ -1475,6 +1482,7 @@ mrb_io_bufread(mrb_state *mrb, mrb_value self)
   mrb_value str;
   mrb_int len;
 
+  mrb->c->ci->mid = 0;
   mrb_get_args(mrb, "Si", &str, &len);
   mrb_assert(RSTRING_LEN(str) > 0);
   mrb_assert(RSTRING_PTR(str) != NULL);
@@ -1491,6 +1499,7 @@ mrb_io_readchar(mrb_state *mrb, mrb_value self)
   unsigned char c;
 #endif
 
+  mrb->c->ci->mid = 0;
   mrb_get_args(mrb, "S", &buf);
   mrb_assert(RSTRING_LEN(buf) > 0);
   mrb_assert(RSTRING_PTR(buf) != NULL);
@@ -1502,12 +1511,8 @@ mrb_io_readchar(mrb_state *mrb, mrb_value self)
     if (len == 1 && RSTRING_LEN(buf) < 4) { /* partial UTF-8 */
       mrb_int blen = RSTRING_LEN(buf);
       ssize_t n;
+      struct mrb_io *fptr = io_get_read_fptr(mrb, self);
 
-      struct mrb_io *fptr = (struct mrb_io*)io_get_open_fptr(mrb, self);
-
-      if (!fptr->readable) {
-        mrb_raise(mrb, E_IO_ERROR, "not opened for reading");
-      }
       /* refill the buffer */
       mrb_str_resize(mrb, buf, 4096);
       n = read(fptr->fd, RSTRING_PTR(buf)+blen, 4096-blen);

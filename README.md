@@ -20,7 +20,7 @@ of the Ministry of Economy, Trade and Industry of Japan.
 
 ## How to get mruby
 
-The stable version 3.0.0 of mruby can be downloaded via the following URL: [https://github.com/mruby/mruby/archive/3.0.0.zip](https://github.com/mruby/mruby/archive/3.0.0.zip)
+The stable version 3.1.0 of mruby can be downloaded via the following URL: [https://github.com/mruby/mruby/archive/3.1.0.zip](https://github.com/mruby/mruby/archive/3.1.0.zip)
 
 The latest development version of mruby can be downloaded via the following URL: [https://github.com/mruby/mruby/zipball/master](https://github.com/mruby/mruby/zipball/master)
 
@@ -67,7 +67,7 @@ rake view_capi
 mruby contains a package manager called *mrbgems*. To create extensions
 in C and/or Ruby you should create a *GEM*. For a documentation of how to
 use mrbgems consult the file [mrbgems.md](doc/guides/mrbgems.md).
-For example code of how to use mrbgems look into the folder *examples/mrbgems/*.
+For example code of how to use mrbgems look into the folder [examples/mrbgems/](examples/mrbgems).
 
 ## License
 
@@ -85,7 +85,7 @@ In the future, mruby might ask you to distribute your new code
 (that you will commit,) under the MIT License as a member of
 "mruby developers" but contributors will keep their copyright.
 (We did not intend for contributors to transfer or waive their copyrights,
-Actual copyright holder name (contributors) will be listed in the [AUTHORS](AUTHORS)
+actual copyright holder name (contributors) will be listed in the [AUTHORS](AUTHORS)
 file.)
 
 Please ask us if you want to distribute your code under another license.

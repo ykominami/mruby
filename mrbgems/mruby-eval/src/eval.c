@@ -7,11 +7,9 @@
 #include <mruby/error.h>
 #include <mruby/presym.h>
 #include <mruby/variable.h>
+#include <mruby/internal.h>
 
 struct REnv *mrb_env_new(mrb_state *mrb, struct mrb_context *c, mrb_callinfo *ci, int nstacks, mrb_value *stack, struct RClass *tc);
-mrb_value mrb_exec_irep(mrb_state *mrb, mrb_value self, struct RProc *p);
-mrb_value mrb_obj_instance_eval(mrb_state *mrb, mrb_value self);
-mrb_value mrb_mod_module_eval(mrb_state*, mrb_value);
 void mrb_codedump_all(mrb_state*, struct RProc*);
 
 static struct RProc*
@@ -144,7 +142,8 @@ static mrb_value
 exec_irep(mrb_state *mrb, mrb_value self, struct RProc *proc)
 {
   /* no argument passed from eval() */
-  mrb->c->ci->argc = 0;
+  mrb->c->ci->n = 0;
+  mrb->c->ci->nk = 0;
   /* clear block */
   mrb->c->ci->stack[1] = mrb_nil_value();
   return mrb_exec_irep(mrb, self, proc);

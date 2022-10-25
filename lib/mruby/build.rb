@@ -123,6 +123,7 @@ module MRuby
         @enable_test = false
         @enable_lock = true
         @enable_presym = true
+        @enable_benchmark = true
         @mrbcfile_external = false
         @internal = internal
         @toolchains = []
@@ -230,6 +231,14 @@ module MRuby
       }
       linker.command = cxx.command if toolchains.find { |v| v == 'gcc' }
       @cxx_abi_enabled = true
+    end
+
+    def benchmark_enabled?
+      @enable_benchmark
+    end
+
+    def disable_benchmark
+      @enable_benchmark = false
     end
 
     def compile_as_cxx(src, cxx_src = nil, obj = nil, includes = [])
@@ -491,7 +500,8 @@ EOS
         v = instance_variable_get(n)
         v = case v
             when nil, true, false, Numeric; v
-            when String, Command; v.clone
+            when String; v.clone
+            when Command; v.clone.tap { |u| u.build = build }
             else Marshal.load(Marshal.dump(v))  # deep clone
             end
         build.instance_variable_set(n, v)
@@ -539,6 +549,23 @@ EOS
       else
         @test_runner.run(mrbtest)
       end
+    end
+
+    def run_bintest
+      puts ">>> Bintest #{name} <<<"
+      targets = @gems.select { |v| File.directory? "#{v.dir}/bintest" }.map { |v| filename v.dir }
+      targets << filename(".") if File.directory? "./bintest"
+      mrbc = @gems["mruby-bin-mrbc"] ? exefile("#{@build_dir}/bin/mrbc") : mrbcfile
+
+      emulator = @test_runner.command
+      emulator = @test_runner.shellquote(emulator) if emulator
+
+      env = {
+        "BUILD_DIR" => @build_dir,
+        "MRBCFILE" => mrbc,
+        "EMULATOR" => @test_runner.emulator,
+      }
+      sh env, "ruby test/bintest.rb#{verbose_flag} #{targets.join ' '}"
     end
 
     protected

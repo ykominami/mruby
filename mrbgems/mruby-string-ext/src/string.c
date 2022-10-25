@@ -4,6 +4,7 @@
 #include <mruby/class.h>
 #include <mruby/string.h>
 #include <mruby/range.h>
+#include <mruby/internal.h>
 
 #define ENC_ASCII_8BIT "ASCII-8BIT"
 #define ENC_BINARY     "BINARY"
@@ -145,27 +146,9 @@ mrb_str_swapcase(mrb_state *mrb, mrb_value self)
   return str;
 }
 
-/*
- *  call-seq:
- *     str << integer       -> str
- *     str.concat(integer)  -> str
- *     str << obj           -> str
- *     str.concat(obj)      -> str
- *
- *  Append---Concatenates the given object to <i>str</i>. If the object is a
- *  <code>Integer</code>, it is considered as a codepoint, and is converted
- *  to a character before concatenation
- *  (equivalent to <code>str.concat(integer.chr(__ENCODING__))</code>).
- *
- *     a = "hello "
- *     a << "world"   #=> "hello world"
- *     a.concat(33)   #=> "hello world!"
- */
-static mrb_value
-mrb_str_concat_m(mrb_state *mrb, mrb_value self)
+static void
+str_concat(mrb_state *mrb, mrb_value self, mrb_value str)
 {
-  mrb_value str = mrb_get_arg1(mrb);
-
   if (mrb_integer_p(str) || mrb_float_p(str))
 #ifdef MRB_UTF8_STRING
     str = int_chr_utf8(mrb, str);
@@ -175,6 +158,39 @@ mrb_str_concat_m(mrb_state *mrb, mrb_value self)
   else
     mrb_ensure_string_type(mrb, str);
   mrb_str_cat_str(mrb, self, str);
+}
+
+/*
+ *  call-seq:
+ *     str << obj           -> str
+ *     str.concat(*obj)     -> str
+ *
+ *    s = 'foo'
+ *    s.concat('bar', 'baz') # => "foobarbaz"
+ *    s                      # => "foobarbaz"
+ *
+ *  For each given object +object+ that is an \Integer,
+ *  the value is considered a codepoint and converted to a character before concatenation:
+ *
+ *    s = 'foo'
+ *    s.concat(32, 'bar', 32, 'baz') # => "foo bar baz"
+ *
+ */
+static mrb_value
+mrb_str_concat_m(mrb_state *mrb, mrb_value self)
+{
+  if (mrb_get_argc(mrb) == 1) {
+    str_concat(mrb, self, mrb_get_arg1(mrb));
+    return self;
+  }
+
+  mrb_value *args;
+  mrb_int alen;
+
+  mrb_get_args(mrb, "*", &args, &alen);
+  for (mrb_int i=0; i<alen; i++) {
+    str_concat(mrb, self, args[i]);
+  }
   return self;
 }
 
@@ -288,7 +304,7 @@ tr_free_pattern(mrb_state *mrb, struct tr_pattern *pat)
 }
 
 static struct tr_pattern*
-tr_parse_pattern(mrb_state *mrb, struct tr_pattern *ret, const mrb_value v_pattern, mrb_bool flag_reverse_enable)
+tr_parse_pattern(mrb_state *mrb, struct tr_pattern *ret, const mrb_value v_pattern, mrb_bool flag_reverse_enable, struct tr_pattern *pat0)
 {
   const char *pattern = RSTRING_PTR(v_pattern);
   mrb_int pattern_length = RSTRING_LEN(v_pattern);
@@ -307,13 +323,13 @@ tr_parse_pattern(mrb_state *mrb, struct tr_pattern *ret, const mrb_value v_patte
     pat1 = ret_uninit
            ? ret
            : (struct tr_pattern*)mrb_malloc_simple(mrb, sizeof(struct tr_pattern));
+    if (pat1 == NULL) {
+      if (pat0) tr_free_pattern(mrb, pat0);
+      tr_free_pattern(mrb, ret);
+      mrb_exc_raise(mrb, mrb_obj_value(mrb->nomem_err));
+      return NULL;            /* not reached */
+    }
     if ((i+2) < pattern_length && pattern[i] != '\\' && pattern[i+1] == '-') {
-      if (pat1 == NULL && ret) {
-      nomem:
-        tr_free_pattern(mrb, ret);
-        mrb_exc_raise(mrb, mrb_obj_value(mrb->nomem_err));
-        return NULL;            /* not reached */
-      }
       pat1->type = TR_RANGE;
       pat1->flag_reverse = flag_reverse;
       pat1->flag_on_heap = !ret_uninit;
@@ -336,10 +352,10 @@ tr_parse_pattern(mrb_state *mrb, struct tr_pattern *ret, const mrb_value v_patte
 
       len = i - start_pos;
       if (len > UINT16_MAX) {
+        if (pat0) tr_free_pattern(mrb, pat0);
+        tr_free_pattern(mrb, ret);
+        if (ret != pat1) mrb_free(mrb, pat1);
         mrb_raise(mrb, E_ARGUMENT_ERROR, "tr pattern too long (max 65535)");
-      }
-      if (pat1 == NULL && ret) {
-        goto nomem;
       }
       pat1->type = TR_IN_ORDER;
       pat1->flag_reverse = flag_reverse;
@@ -349,10 +365,7 @@ tr_parse_pattern(mrb_state *mrb, struct tr_pattern *ret, const mrb_value v_patte
       pat1->val.start_pos = (uint16_t)start_pos;
     }
 
-    if (ret == NULL || ret_uninit) {
-      ret = pat1;
-    }
-    else {
+    if (!ret_uninit) {
       struct tr_pattern *p = ret;
       while (p->next != NULL) {
         p = p->next;
@@ -448,7 +461,7 @@ tr_bitmap_detect(uint8_t bitmap[32], uint8_t ch)
   return FALSE;
 }
 
-/* compile patter to bitmap */
+/* compile pattern to bitmap */
 static void
 tr_compile_pattern(const struct tr_pattern *pat, mrb_value pstr, uint8_t bitmap[32])
 {
@@ -487,18 +500,17 @@ static mrb_bool
 str_tr(mrb_state *mrb, mrb_value str, mrb_value p1, mrb_value p2, mrb_bool squeeze)
 {
   struct tr_pattern pat = STATIC_TR_PATTERN;
-  struct tr_pattern rep_storage = STATIC_TR_PATTERN;
+  struct tr_pattern rep = STATIC_TR_PATTERN;
   char *s;
   mrb_int len;
   mrb_int i;
   mrb_int j;
   mrb_bool flag_changed = FALSE;
   mrb_int lastch = -1;
-  struct tr_pattern *rep;
 
   mrb_str_modify(mrb, mrb_str_ptr(str));
-  tr_parse_pattern(mrb, &pat, p1, TRUE);
-  rep = tr_parse_pattern(mrb, &rep_storage, p2, FALSE);
+  tr_parse_pattern(mrb, &pat, p1, TRUE, NULL);
+  tr_parse_pattern(mrb, &rep, p2, FALSE, &pat);
   s = RSTRING_PTR(str);
   len = RSTRING_LEN(str);
 
@@ -508,27 +520,24 @@ str_tr(mrb_state *mrb, mrb_value str, mrb_value p1, mrb_value p2, mrb_bool squee
     if (i>j) s[j] = s[i];
     if (n >= 0) {
       flag_changed = TRUE;
-      if (rep == NULL) {
-        j--;
-      }
-      else {
-        mrb_int c = tr_get_character(rep, RSTRING_PTR(p2), n);
+      mrb_int c = tr_get_character(&rep, RSTRING_PTR(p2), n);
 
-        if (c < 0 || (squeeze && c == lastch)) {
-          j--;
-          continue;
-        }
-        if (c > 0x80) {
-          mrb_raisef(mrb, E_ARGUMENT_ERROR, "character (%i) out of range", c);
-        }
-        lastch = c;
-        s[i] = (char)c;
+      if (c < 0 || (squeeze && c == lastch)) {
+        j--;
+        continue;
       }
+      if (c > 0x80) {
+        tr_free_pattern(mrb, &pat);
+        tr_free_pattern(mrb, &rep);
+        mrb_raisef(mrb, E_ARGUMENT_ERROR, "character (%i) out of range", c);
+      }
+      lastch = c;
+      s[i] = (char)c;
     }
   }
 
   tr_free_pattern(mrb, &pat);
-  tr_free_pattern(mrb, rep);
+  tr_free_pattern(mrb, &rep);
 
   if (flag_changed) {
     RSTR_SET_LEN(RSTRING(str), j);
@@ -661,7 +670,7 @@ str_squeeze(mrb_state *mrb, mrb_value str, mrb_value v_pat)
 
   mrb_str_modify(mrb, mrb_str_ptr(str));
   if (!mrb_nil_p(v_pat)) {
-    pat = tr_parse_pattern(mrb, &pat_storage, v_pat, TRUE);
+    pat = tr_parse_pattern(mrb, &pat_storage, v_pat, TRUE, NULL);
     tr_compile_pattern(pat, v_pat, bitmap);
     tr_free_pattern(mrb, pat);
   }
@@ -752,7 +761,7 @@ str_delete(mrb_state *mrb, mrb_value str, mrb_value v_pat)
   uint8_t bitmap[32];
 
   mrb_str_modify(mrb, mrb_str_ptr(str));
-  tr_parse_pattern(mrb, &pat, v_pat, TRUE);
+  tr_parse_pattern(mrb, &pat, v_pat, TRUE, NULL);
   tr_compile_pattern(&pat, v_pat, bitmap);
   tr_free_pattern(mrb, &pat);
 
@@ -820,7 +829,7 @@ mrb_str_count(mrb_state *mrb, mrb_value str)
   uint8_t bitmap[32];
 
   mrb_get_args(mrb, "S", &v_pat);
-  tr_parse_pattern(mrb, &pat, v_pat, TRUE);
+  tr_parse_pattern(mrb, &pat, v_pat, TRUE, NULL);
   tr_compile_pattern(&pat, v_pat, bitmap);
   tr_free_pattern(mrb, &pat);
 
@@ -995,28 +1004,18 @@ mrb_str_succ(mrb_state *mrb, mrb_value self)
 }
 
 #ifdef MRB_UTF8_STRING
-static const char utf8len_codepage_zero[256] =
-{
-  1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
-  1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
-  1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
-  1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
-  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-  2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
-  3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,4,4,4,4,4,0,0,0,0,0,0,0,0,0,0,0,
-};
+extern const char mrb_utf8len_table[];
 
 static mrb_int
-utf8code(unsigned char* p)
+utf8code(unsigned char* p, mrb_int limit)
 {
   mrb_int len;
 
   if (p[0] < 0x80)
     return p[0];
 
-  len = utf8len_codepage_zero[p[0]];
-  if (len > 1 && (p[1] & 0xc0) == 0x80) {
+  len = mrb_utf8len_table[p[0]>>3];
+  if (len <= limit && len > 1 && (p[1] & 0xc0) == 0x80) {
     if (len == 2)
       return ((p[0] & 0x1f) << 6) + (p[1] & 0x3f);
     if ((p[2] & 0xc0) == 0x80) {
@@ -1027,20 +1026,10 @@ utf8code(unsigned char* p)
         if (len == 4)
           return ((p[0] & 0x07) << 18) + ((p[1] & 0x3f) << 12)
             + ((p[2] & 0x3f) << 6) + (p[3] & 0x3f);
-        if ((p[4] & 0xc0) == 0x80) {
-          if (len == 5)
-            return ((p[0] & 0x03) << 24) + ((p[1] & 0x3f) << 18)
-              + ((p[2] & 0x3f) << 12) + ((p[3] & 0x3f) << 6)
-              + (p[4] & 0x3f);
-          if ((p[5] & 0xc0) == 0x80 && len == 6)
-            return ((p[0] & 0x01) << 30) + ((p[1] & 0x3f) << 24)
-              + ((p[2] & 0x3f) << 18) + ((p[3] & 0x3f) << 12)
-              + ((p[4] & 0x3f) << 6) + (p[5] & 0x3f);
-        }
       }
     }
   }
-  return p[0];
+  return -1;
 }
 
 static mrb_value
@@ -1048,7 +1037,9 @@ mrb_str_ord(mrb_state* mrb, mrb_value str)
 {
   if (RSTRING_LEN(str) == 0)
     mrb_raise(mrb, E_ARGUMENT_ERROR, "empty string");
-  return mrb_fixnum_value(utf8code((unsigned char*) RSTRING_PTR(str)));
+  mrb_int c = utf8code((unsigned char*)RSTRING_PTR(str), RSTRING_LEN(str));
+  if (c < 0) mrb_raise(mrb, E_ARGUMENT_ERROR, "invalid UTF-8 byte sequence");
+  return mrb_fixnum_value(c);
 }
 #else
 static mrb_value
@@ -1290,7 +1281,7 @@ mrb_mruby_string_ext_gem_init(mrb_state* mrb)
 
   mrb_define_method(mrb, s, "__lines",         mrb_str_lines,           MRB_ARGS_NONE());
 
-  mrb_define_method(mrb, mrb_class_get(mrb, "Integer"), "chr", mrb_int_chr, MRB_ARGS_OPT(1));
+  mrb_define_method(mrb, mrb->integer_class, "chr", mrb_int_chr, MRB_ARGS_OPT(1));
 }
 
 void

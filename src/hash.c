@@ -11,6 +11,7 @@
 #include <mruby/hash.h>
 #include <mruby/string.h>
 #include <mruby/variable.h>
+#include <mruby/internal.h>
 #include <mruby/presym.h>
 
 /*
@@ -69,8 +70,8 @@
 #define AR_MAX_SIZE 16
 #define H_MAX_SIZE EA_MAX_CAPA
 
-mrb_static_assert1(offsetof(struct RHash, iv) == offsetof(struct RObject, iv));
-mrb_static_assert1(AR_MAX_SIZE < (1 << MRB_HASH_AR_EA_CAPA_BIT));
+mrb_static_assert(offsetof(struct RHash, iv) == offsetof(struct RObject, iv));
+mrb_static_assert(AR_MAX_SIZE < (1 << MRB_HASH_AR_EA_CAPA_BIT));
 
 typedef struct hash_entry {
   mrb_value key;
@@ -243,7 +244,7 @@ DEFINE_SWITCHER(ht, HT)
   * assumptions.
   */
 # define HT_ASSERT_SAFE_READ(attr_name)                                       \
-  mrb_static_assert1(                                                         \
+  mrb_static_assert(                                                          \
     offsetof(hash_table, attr_name) + sizeof(((hash_table*)0)->attr_name) <=  \
     sizeof(hash_entry))
 HT_ASSERT_SAFE_READ(ea);
@@ -293,6 +294,7 @@ static uint32_t ib_bit_to_capa(uint32_t bit);
 static void ht_init(
   mrb_state *mrb, struct RHash *h, uint32_t size,
   hash_entry *ea, uint32_t ea_capa, hash_table *ht, uint32_t ib_bit);
+static void ht_set(mrb_state *mrb, struct RHash *h, mrb_value key, mrb_value val);
 static void ht_set_without_ib_adjustment(
   mrb_state *mrb, struct RHash *h, mrb_value key, mrb_value val);
 
@@ -326,8 +328,15 @@ obj_hash_code(mrb_state *mrb, mrb_value key, struct RHash *h)
   case MRB_TT_TRUE:
   case MRB_TT_FALSE:
   case MRB_TT_SYMBOL:
+    hash_code = U32(mrb_fixnum(key));
+    break;
   case MRB_TT_INTEGER:
+    if (mrb_fixnum_p(key)) {
+      hash_code = U32(mrb_fixnum(key));
+      break;
+    }
 #ifndef MRB_NO_FLOAT
+    /* fall through */
   case MRB_TT_FLOAT:
 #endif
     hash_code = U32(mrb_obj_id(key));
@@ -523,9 +532,8 @@ ar_set(mrb_state *mrb, struct RHash *h, mrb_value key, mrb_value val)
     if (ea_capa == ea_n_used) {
       if (size == ea_n_used) {
         if (size == AR_MAX_SIZE) {
-          hash_entry *ea = ea_adjust(mrb, ar_ea(h), &ea_capa, EA_MAX_CAPA);
-          ea_set(ea, ea_n_used, key, val);
-          ht_init(mrb, h, ++size, ea, ea_capa, NULL, IB_INIT_BIT);
+          ht_init(mrb, h, size, ar_ea(h), ea_capa, NULL, IB_INIT_BIT);
+          ht_set(mrb, h, key, val);
           return;
         }
         else {
@@ -776,8 +784,9 @@ ht_init(mrb_state *mrb, struct RHash *h, uint32_t size,
 {
   size_t ib_byte_size = ib_byte_size_for(ib_bit);
   size_t ht_byte_size = sizeof(hash_table) + ib_byte_size;
+  ht = (hash_table*)mrb_realloc(mrb, ht, ht_byte_size);
   h_ht_on(h);
-  h_set_ht(h, (hash_table*)mrb_realloc(mrb, ht, ht_byte_size));
+  h_set_ht(h, ht);
   ht_set_size(h, size);
   ht_set_ea(h, ea);
   ht_set_ea_capa(h, ea_capa);
@@ -1187,15 +1196,6 @@ mrb_hash_init_copy(mrb_state *mrb, mrb_value self)
   hash_modify(mrb, self);
   if (mrb_hash_ptr(self) != mrb_hash_ptr(orig)) hash_replace(mrb, self, orig);
   return self;
-}
-
-void
-mrb_hash_check_kdict(mrb_state *mrb, mrb_value self)
-{
-  h_each(mrb_hash_ptr(self), entry, {
-    if (mrb_symbol_p(entry->key)) continue;
-    mrb_raise(mrb, E_ARGUMENT_ERROR, "keyword argument hash with non symbol keys");
-  });
 }
 
 MRB_API mrb_value
@@ -1747,6 +1747,19 @@ mrb_hash_merge(mrb_state *mrb, mrb_value hash1, mrb_value hash2)
   });
 }
 
+static mrb_value
+mrb_hash_merge_m(mrb_state *mrb, mrb_value hash)
+{
+  mrb_int argc;
+  mrb_value *argv;
+
+  mrb_get_args(mrb, "*", &argv, &argc);
+  while (argc--) {
+    mrb_hash_merge(mrb, hash, *argv++);
+  }
+  return hash;
+}
+
 /*
  *  call-seq:
  *    hsh.rehash -> hsh
@@ -1807,4 +1820,5 @@ mrb_init_hash(mrb_state *mrb)
   mrb_define_method(mrb, h, "value?",          mrb_hash_has_value,   MRB_ARGS_REQ(1)); /* 15.2.13.4.27 */
   mrb_define_method(mrb, h, "values",          mrb_hash_values,      MRB_ARGS_NONE()); /* 15.2.13.4.28 */
   mrb_define_method(mrb, h, "rehash",          mrb_hash_rehash,      MRB_ARGS_NONE());
+  mrb_define_method(mrb, h, "__merge",         mrb_hash_merge_m,     MRB_ARGS_REQ(1));
 }

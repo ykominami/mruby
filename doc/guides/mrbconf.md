@@ -1,16 +1,34 @@
 # mruby configuration macros
 
+## The configuration file
+
+You can do the build configuration in the build configuration file. The default
+configuration file is `build_config/default.rb`.
+
+You can specify your own configuration file by the `MRUBY_CONFIG` environment
+variable (you can use `CONFIG` for shorthand for `MRUBY_CONFIG`). If the path
+doesn't exist, `build_config/${MRUBY_CONFIG}.rb` is used.
+
 ## How to use these macros
 
-You can use mrbconfs with following ways:
+Just add the configuration value to the `MRuby::Build#defines` attribute.
+This is the same for `MRuby::CrossBuild`.
 
-* Write them in `mrbconf.h`.
-  * Using compiler flags is preferred  when building a cross binaries or multiple mruby binaries
-    since it's easier to use different mrbconf per each `MRuby::Build`.
-  * Most flags can be enabled by just commenting in.
-* Pass them as compiler flags.
-  * Make sure you pass the same flags to all compilers since some mrbconf(e.g., `MRB_GC_FIXED_ARENA`)
-    changes `struct` layout and cause memory access error when C and other language(e.g., C++) is mixed.
+```ruby
+# build_config.rb
+
+MRuby::Build.new do |conf|
+  .....
+  conf.defines << 'MRB_GC_FIXED_ARENA'
+  conf.defines << 'MRB_NO_METHOD_CACHE'
+  .....
+end
+```
+
+***NOTE***
+
+* Use common definitions (`conf.defines`) instead of per-compiler definitions (e.g., `conf.cc.defines`) unless there is a special reason not to.
+* It is now deprecated to edit the `include/mruby/mrbconf.h` file or give it directly as a compiler flag, as was the case before.
 
 ## stdio setting
 
@@ -41,7 +59,7 @@ You can use mrbconfs with following ways:
 `MRB_STACK_EXTEND_DOUBLING`
 
 * If defined doubles the stack size when extending it.
-* Else extends stack with `MRB_STACK_GROWTH`.
+* Otherwise extends stack with `MRB_STACK_GROWTH`.
 
 `MRB_STACK_GROWTH`
 
@@ -64,7 +82,7 @@ You can use mrbconfs with following ways:
 `MRB_NO_FLOAT`
 
 * When defined removes floating-point numbers from mruby.
-* It makes mruby easier to handle in "Microcontroller without FPU" and "Kernel Space".
+* It makes mruby easier to handle in "Micro-controller without FPU" and "Kernel Space".
 
 `MRB_INT32`
 
@@ -82,6 +100,8 @@ You can use mrbconfs with following ways:
 
 * When defined full GC is emitted per each `RBasic` allocation.
 * Mainly used in memory manager debugging.
+* If defined at the same time as `MRB_DEBUG`, full GC is emitted also per each heap allocation (`mrb_malloc()` or etc.).
+  This configuration slows down mruby execution by a factor of 2 to 3 or even more.
 
 `MRB_GC_TURN_OFF_GENERATIONAL`
 
@@ -170,10 +190,24 @@ largest value of required alignment.
 
 ## Other configuration
 
+`MRB_MALLOC_TRIM`
+
+* call malloc_trim(0) for each mrb_full_gc() call
+
 `MRB_UTF8_STRING`
 
 * Adds UTF-8 encoding support to character-oriented String instance methods.
 * If it isn't defined, they only support the US-ASCII encoding.
+
+`MRB_STR_LENGTH_MAX`
+
+* The maximum length of strings (default 1MB)
+* set this value to zero to skip the check
+
+`MRB_ARY_LENGTH_MAX`
+
+* The maximum length of strings (default 1MB)
+* set this value to zero to skip the check
 
 `MRB_FUNCALL_ARGC_MAX`
 
@@ -207,3 +241,12 @@ largest value of required alignment.
 
 * Make it available `Symbol.all_symbols` in `mrbgems/mruby-symbol-ext`
 * Increase heap memory usage.
+
+`MRB_USE_ALL_SYMBOLS`
+
+* Make it available `Symbol.all_symbols` in `mrbgems/mruby-symbol-ext`
+* Increase heap memory usage.
+
+`MRB_NO_DIRECT_THREADING`
+
+* Turn off direct threading optimization in VM loop

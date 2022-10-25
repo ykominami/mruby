@@ -1,21 +1,20 @@
 # Security Policy
 
-## Supported Versions
-
-Use this section to tell people about which versions of your project are
-currently being supported with security updates.
-
-| Version | Supported          |
-| ------- | ------------------ |
-| 5.1.x   | :white_check_mark: |
-| 5.0.x   | :x:                |
-| 4.0.x   | :white_check_mark: |
-| < 4.0   | :x:                |
-
 ## Reporting a Vulnerability
 
-Use this section to tell people how to report a vulnerability.
+If you have any security concern, contact <matz@ruby.or.jp>.
 
-Tell them where to go, how often they can expect to get an update on a
-reported vulnerability, what to expect if the vulnerability is accepted or
-declined, etc.
+## Scope
+
+We consider the following issues as vulnerabilities:
+
+- Remote code execution
+- Crash caused by a valid Ruby script
+
+We _don't_ consider the following issues as vulnerabilities:
+
+- Runtime C undefined behavior (including integer overflow)
+- Crash caused by misused API
+- Crash caused by modified compiled binary
+- ASAN/Valgrind warning for too big memory allocation
+  mruby assumes `malloc(3)` returns `NULL` for too big allocations

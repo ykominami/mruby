@@ -31,6 +31,7 @@ typedef struct mrbc_context {
   mrb_bool no_exec:1;
   mrb_bool keep_lv:1;
   mrb_bool no_optimize:1;
+  mrb_bool no_ext_ops:1;
   const struct RProc *upper;
 
   size_t parser_nerr;
@@ -56,7 +57,7 @@ enum mrb_lex_state_enum {
   EXPR_ENDFN,                 /* ditto, and unbound braces. */
   EXPR_ARG,                   /* newline significant, +/- is an operator. */
   EXPR_CMDARG,                /* newline significant, +/- is an operator. */
-  EXPR_MID,                   /* newline significant, +/- is an operator. */
+  EXPR_MID,                   /* newline significant, +/- is a sign. */
   EXPR_FNAME,                 /* ignore newline, no reserved words. */
   EXPR_DOT,                   /* right after '.' or '::', no reserved words. */
   EXPR_CLASS,                 /* immediate after 'class', no here document. */
@@ -98,9 +99,9 @@ enum mrb_string_type {
 struct mrb_parser_heredoc_info {
   mrb_bool allow_indent:1;
   mrb_bool remove_indent:1;
+  mrb_bool line_head:1;
   size_t indent;
   mrb_ast_node *indented;
-  mrb_bool line_head:1;
   enum mrb_string_type type;
   const char *term;
   int term_len;
@@ -126,7 +127,7 @@ struct mrb_parser_state {
   int column;
 
   enum mrb_lex_state_enum lstate;
-  mrb_ast_node *lex_strterm; /* (type nest_level beg . end) */
+  struct parser_lex_strterm *lex_strterm;
 
   unsigned int cond_stack;
   unsigned int cmdarg_stack;
@@ -142,10 +143,8 @@ struct mrb_parser_state {
   int tidx;
   int tsiz;
 
-  mrb_ast_node *all_heredocs; /* list of mrb_parser_heredoc_info* */
   mrb_ast_node *heredocs_from_nextline;
   mrb_ast_node *parsing_heredoc;
-  mrb_ast_node *lex_strterm_before_heredoc;
 
   void *ylval;
 
@@ -155,6 +154,7 @@ struct mrb_parser_state {
 
   mrb_bool no_optimize:1;
   mrb_bool capture_errors:1;
+  mrb_bool no_ext_ops:1;
   const struct RProc *upper;
   struct mrb_parser_message error_buffer[10];
   struct mrb_parser_message warn_buffer[10];

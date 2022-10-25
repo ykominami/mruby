@@ -3,6 +3,7 @@
 #include <mruby/array.h>
 #include <mruby/range.h>
 #include <mruby/hash.h>
+#include <mruby/internal.h>
 #include <mruby/presym.h>
 
 /*
@@ -103,13 +104,13 @@ ary_ref(mrb_state *mrb, mrb_value ary, mrb_int n)
 static mrb_value
 mrb_ary_values_at(mrb_state *mrb, mrb_value self)
 {
-  mrb_int argc;
-  const mrb_value *argv;
-
-  mrb_get_args(mrb, "*", &argv, &argc);
+  mrb_int argc = mrb_get_argc(mrb);
+  const mrb_value *argv = mrb_get_argv(mrb);
 
   return mrb_get_values_at(mrb, self, RARRAY_LEN(self), argc, argv, ary_ref);
 }
+
+mrb_value mrb_ary_delete_at(mrb_state *mrb, mrb_value self);
 
 /*
  *  call-seq:
@@ -136,8 +137,7 @@ static mrb_value
 mrb_ary_slice_bang(mrb_state *mrb, mrb_value self)
 {
   struct RArray *a = mrb_ary_ptr(self);
-  mrb_int i, j, k, len, alen;
-  mrb_value val;
+  mrb_int i, j, len, alen;
   mrb_value *ptr;
   mrb_value ary;
 
@@ -146,21 +146,13 @@ mrb_ary_slice_bang(mrb_state *mrb, mrb_value self)
   if (mrb_get_argc(mrb) == 1) {
     mrb_value index = mrb_get_arg1(mrb);
 
-    switch (mrb_type(index)) {
-    case MRB_TT_RANGE:
+    if (mrb_type(index) == MRB_TT_RANGE) {
       if (mrb_range_beg_len(mrb, index, &i, &len, ARY_LEN(a), TRUE) == MRB_RANGE_OK) {
         goto delete_pos_len;
       }
-      else {
-        return mrb_nil_value();
-      }
-    case MRB_TT_INTEGER:
-      val = mrb_funcall_id(mrb, self, MRB_SYM(delete_at), 1, index);
-      return val;
-    default:
-      val = mrb_funcall_id(mrb, self, MRB_SYM(delete_at), 1, index);
-      return val;
+      return mrb_nil_value();
     }
+    return mrb_ary_delete_at(mrb, self);
   }
 
   mrb_get_args(mrb, "ii", &i, &len);
@@ -172,13 +164,9 @@ mrb_ary_slice_bang(mrb_state *mrb, mrb_value self)
   if (alen == i) return mrb_ary_new(mrb);
   if (len > alen - i) len = alen - i;
 
-  ary = mrb_ary_new_capa(mrb, len);
-  ptr = ARY_PTR(a);
-  for (j = i, k = 0; k < len; ++j, ++k) {
-    mrb_ary_push(mrb, ary, ptr[j]);
-  }
+  ptr = ARY_PTR(a) + i;
+  ary = mrb_ary_new_from_values(mrb, len, ptr);
 
-  ptr += i;
   for (j = i; j < alen - len; ++j) {
     *ptr = *(ptr+len);
     ++ptr;
@@ -264,12 +252,14 @@ mrb_ary_compact_bang(mrb_state *mrb, mrb_value self)
 static mrb_value
 mrb_ary_rotate(mrb_state *mrb, mrb_value self)
 {
+  mrb_int count=1;
+  mrb_get_args(mrb, "|i", &count);
+
   mrb_value ary = mrb_ary_new(mrb);
   mrb_int len = RARRAY_LEN(self);
   mrb_value *p = RARRAY_PTR(self);
-  mrb_int count=1, idx;
+  mrb_int idx;
 
-  mrb_get_args(mrb, "|i", &count);
   if (len <= 0) return ary;
   if (count < 0) {
     idx = len - (~count % len) - 1;
@@ -313,12 +303,14 @@ rev(mrb_value *p, mrb_int beg, mrb_int end)
 static mrb_value
 mrb_ary_rotate_bang(mrb_state *mrb, mrb_value self)
 {
+  mrb_int count=1;
+  mrb_get_args(mrb, "|i", &count);
+
   struct RArray *a = mrb_ary_ptr(self);
   mrb_int len = ARY_LEN(a);
   mrb_value *p = ARY_PTR(a);
-  mrb_int count=1, idx;
+  mrb_int idx;
 
-  mrb_get_args(mrb, "|i", &count);
   mrb_ary_modify(mrb, a);
   if (len == 0 || count == 0) return self;
   if (count == 1) {

@@ -14,6 +14,7 @@
 #include <mruby/opcode.h>
 #include <mruby/variable.h>
 #include <mruby/proc.h>
+#include <mruby/internal.h>
 
 #include "mrdb.h"
 #include "apibreak.h"
@@ -186,9 +187,9 @@ static mrb_debug_context*
 mrb_debug_context_new(mrb_state *mrb)
 {
   mrb_debug_context *dbg = (mrb_debug_context*)mrb_malloc(mrb, sizeof(mrb_debug_context));
+  static const mrb_debug_context dbg_zero = {0};
 
-  memset(dbg, 0, sizeof(mrb_debug_context));
-
+  *dbg = dbg_zero;
   dbg->xm = DBG_INIT;
   dbg->xphase = DBG_PHASE_BEFORE_RUN;
   dbg->next_bpno = 1;
@@ -225,9 +226,9 @@ static mrdb_state*
 mrdb_state_new(mrb_state *mrb)
 {
   mrdb_state *mrdb = (mrdb_state*)mrb_malloc(mrb, sizeof(mrdb_state));
+  static const mrdb_state mrdb_zero = {0};
 
-  memset(mrdb, 0, sizeof(mrdb_state));
-
+  *mrdb = mrdb_zero;
   mrdb->dbg = mrb_debug_context_get(mrb);
   mrdb->command = (char*)mrb_malloc(mrb, MAX_COMMAND_LINE+1);
   mrdb->print_no = 1;

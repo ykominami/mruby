@@ -72,9 +72,17 @@ enum pack_type {
 
 const static unsigned char base64chars[] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-static unsigned char base64_dec_tab[128];
+const static unsigned char base64_dec_tab[] =
+  "\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff"
+  "\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff"
+  "\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x3e\xff\xff\xff\x3f"
+  "\x34\x35\x36\x37\x38\x39\x3a\x3b\x3c\x3d\xff\xff\xff\xfe\xff\xff"
+  "\xff\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e"
+  "\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\xff\xff\xff\xff\xff"
+  "\xff\x1a\x1b\x1c\x1d\x1e\x1f\x20\x21\x22\x23\x24\x25\x26\x27\x28"
+  "\x29\x2a\x2b\x2c\x2d\x2e\x2f\x30\x31\x32\x33\xff\xff\xff\xff\xff";
 
-static unsigned int
+static int
 hex2int(unsigned char ch)
 {
   if (ch >= '0' && ch <= '9')
@@ -85,22 +93,6 @@ hex2int(unsigned char ch)
     return 10 + (ch - 'a');
   else
     return -1;
-}
-
-static void
-make_base64_dec_tab(void)
-{
-  int i;
-  memset(base64_dec_tab, PACK_BASE64_IGNORE, sizeof(base64_dec_tab));
-  for (i = 0; i < 26; i++)
-    base64_dec_tab['A' + i] = i;
-  for (i = 0; i < 26; i++)
-    base64_dec_tab['a' + i] = i + 26;
-  for (i = 0; i < 10; i++)
-    base64_dec_tab['0' + i] = i + 52;
-  base64_dec_tab['+'+0] = 62;
-  base64_dec_tab['/'+0] = 63;
-  base64_dec_tab['='+0] = PACK_BASE64_PADDING;
 }
 
 static mrb_value
@@ -387,13 +379,13 @@ static int
 pack_BER(mrb_state *mrb, mrb_value o, mrb_value str, mrb_int sidx, unsigned int flags)
 {
   mrb_int n = mrb_integer(o);
-  size_t i;
+  int i;
   char *p;
 
   if (n < 0) {
     mrb_raise(mrb, E_ARGUMENT_ERROR, "can't compress negative numbers");
   }
-  for (i=1; i<sizeof(mrb_int)+1; i++) {
+  for (i=1; i<(int)sizeof(mrb_int)+1; i++) {
     mrb_int mask = ~((1L<<(7*i))-1);
     if ((n & mask) == 0) break;
   }
@@ -410,11 +402,16 @@ pack_BER(mrb_state *mrb, mrb_value o, mrb_value str, mrb_int sidx, unsigned int 
 static int
 unpack_BER(mrb_state *mrb, const unsigned char *src, int srclen, mrb_value ary, unsigned int flags)
 {
-  mrb_int i, n = 0;
+  int i;
+  mrb_int n = 0;
   const unsigned char *p = src;
   const unsigned char *e = p + srclen;
 
+  if (srclen == 0) return 0;
   for (i=1; p<e; p++,i++) {
+    if (n > (MRB_INT_MAX>>7)) {
+      mrb_raise(mrb, E_RANGE_ERROR, "BER unpacking 'w' overflow");
+    }
     n <<= 7;
     n |= *p & 0x7f;
     if ((*p & 0x80) == 0) break;
@@ -617,6 +614,7 @@ utf8_to_uv(mrb_state *mrb, const char *p, long *lenp)
   }
   if (!(uv & 0x40)) {
     *lenp = 1;
+  malformed:
     mrb_raise(mrb, E_ARGUMENT_ERROR, "malformed UTF-8 character");
   }
 
@@ -627,7 +625,7 @@ utf8_to_uv(mrb_state *mrb, const char *p, long *lenp)
   else if (!(uv & 0x02)) { n = 6; uv &= 0x01; }
   else {
     *lenp = 1;
-    mrb_raise(mrb, E_ARGUMENT_ERROR, "malformed UTF-8 character");
+    goto malformed;
   }
   if (n > *lenp) {
     mrb_raisef(mrb, E_ARGUMENT_ERROR, "malformed UTF-8 character (expected %d bytes, given %d bytes)",
@@ -639,7 +637,7 @@ utf8_to_uv(mrb_state *mrb, const char *p, long *lenp)
       c = *p++ & 0xff;
       if ((c & 0xc0) != 0x80) {
         *lenp -= n + 1;
-        mrb_raise(mrb, E_ARGUMENT_ERROR, "malformed UTF-8 character");
+        goto malformed;
       }
       else {
         c &= 0x3f;
@@ -743,7 +741,8 @@ unpack_str(mrb_state *mrb, const void *src, int slen, mrb_value ary, int count, 
 static int
 pack_hex(mrb_state *mrb, mrb_value src, mrb_value dst, mrb_int didx, int count, unsigned int flags)
 {
-  unsigned int a, ashift, b, bshift;
+  int a, b;
+  unsigned int ashift, bshift;
   long slen;
   char *dptr, *dptr0, *sptr;
 
@@ -1297,7 +1296,7 @@ alias:
         mrb_raise(mrb, E_RUNTIME_ERROR, "too big template length");
       }
       count = (int)n;
-      tmpl->idx = e - tptr;
+      tmpl->idx = (int)(e - tptr);
       continue;
     } else if (ch == '*')  {
       if (type == PACK_TYPE_NONE)
@@ -1384,13 +1383,12 @@ mrb_pack_pack(mrb_state *mrb, mrb_value ary)
 
       o = mrb_ary_ref(mrb, ary, aidx);
       if (type == PACK_TYPE_INTEGER) {
-        o = mrb_to_integer(mrb, o);
+        o = mrb_ensure_int_type(mrb, o);
       }
 #ifndef MRB_NO_FLOAT
       else if (type == PACK_TYPE_FLOAT) {
         if (!mrb_float_p(o)) {
-          mrb_float f = mrb_as_float(mrb, o);
-          o = mrb_float_value(mrb, f);
+          o = mrb_ensure_float_type(mrb, o);
         }
       }
 #endif
@@ -1513,7 +1511,6 @@ pack_unpack(mrb_state *mrb, mrb_value str, int single)
     case PACK_DIR_BASE64:
       srcidx += unpack_base64(mrb, sptr, srclen - srcidx, result);
       continue;
-      break;
     case PACK_DIR_QENC:
       srcidx += unpack_qenc(mrb, sptr, srclen - srcidx, result);
       continue;
@@ -1521,7 +1518,7 @@ pack_unpack(mrb_state *mrb, mrb_value str, int single)
       break;
     }
 
-    while (count != 0) {
+    while (count != 0 && srcidx < srclen) {
       if (srclen - srcidx < size) {
         while (count-- > 0) {
           mrb_ary_push(mrb, result, mrb_nil_value());
@@ -1564,14 +1561,12 @@ pack_unpack(mrb_state *mrb, mrb_value str, int single)
         count--;
       }
     }
-    if (single) break;
-  }
-
-  if (single) {
-    if (RARRAY_LEN(result) > 0) {
-      return RARRAY_PTR(result)[0];
+    if (single) {
+      if (RARRAY_LEN(result) > 0) {
+        return RARRAY_PTR(result)[0];
+      }
+      return mrb_nil_value();
     }
-    return mrb_nil_value();
   }
   return result;
 }
@@ -1591,8 +1586,6 @@ mrb_pack_unpack1(mrb_state *mrb, mrb_value str)
 void
 mrb_mruby_pack_gem_init(mrb_state *mrb)
 {
-  make_base64_dec_tab();
-
   mrb_define_method(mrb, mrb->array_class, "pack", mrb_pack_pack, MRB_ARGS_REQ(1));
   mrb_define_method(mrb, mrb->string_class, "unpack", mrb_pack_unpack, MRB_ARGS_REQ(1));
   mrb_define_method(mrb, mrb->string_class, "unpack1", mrb_pack_unpack1, MRB_ARGS_REQ(1));

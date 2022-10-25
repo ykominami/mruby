@@ -12,6 +12,7 @@
 #include <mruby/class.h>
 #include <mruby/proc.h>
 #include <mruby/variable.h>
+#include <mruby/internal.h>
 #include "mrdberror.h"
 #include "apibreak.h"
 #include "apistring.h"
@@ -19,8 +20,6 @@
 #define MAX_BREAKPOINTNO (MAX_BREAKPOINT * 1024)
 #define MRB_DEBUG_BP_FILE_OK   (0x0001)
 #define MRB_DEBUG_BP_LINENO_OK (0x0002)
-
-uint32_t mrb_packed_int_decode(uint8_t *p, uint8_t **newpos);
 
 static uint16_t
 check_lineno(mrb_irep_debug_info_file *info_file, uint16_t lineno)
@@ -47,8 +46,8 @@ check_lineno(mrb_irep_debug_info_file *info_file, uint16_t lineno)
 
   case mrb_debug_line_packed_map:
     {
-      uint8_t *p = info_file->lines.packed_map;
-      uint8_t *pend = p + count;
+      const uint8_t *p = info_file->lines.packed_map;
+      const uint8_t *pend = p + count;
       uint32_t line = 0;
       while (p < pend) {
         mrb_packed_int_decode(p, &p);
@@ -344,10 +343,10 @@ mrb_debug_delete_break(mrb_state *mrb, mrb_debug_context *dbg, uint32_t bpno)
 
   for(i = index ; i < dbg->bpnum; i++) {
     if ((i + 1) == dbg->bpnum) {
-      memset(&dbg->bp[i], 0, sizeof(mrb_debug_breakpoint));
+      dbg->bp[i] = (mrb_debug_breakpoint){0};
     }
     else {
-      memcpy(&dbg->bp[i], &dbg->bp[i + 1], sizeof(mrb_debug_breakpoint));
+      dbg->bp[i] = dbg->bp[i + 1];
     }
   }
 

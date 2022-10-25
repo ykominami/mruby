@@ -34,6 +34,9 @@ MRuby::GemBox.new do |conf|
   # Use ObjectSpace class
   conf.gem :core => "mruby-objectspace"
 
+  # Use Set class
+  conf.gem :core => "mruby-set"
+
   # Use Fiber class
   conf.gem :core => "mruby-fiber"
 
@@ -51,4 +54,7 @@ MRuby::GemBox.new do |conf|
 
   # Use class/module extension
   conf.gem :core => "mruby-class-ext"
+
+  # Use errno extension
+  conf.gem :core => "mruby-errno"
 end

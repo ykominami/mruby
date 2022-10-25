@@ -9,9 +9,10 @@
 #include <mruby/proc.h>
 #include <mruby/opcode.h>
 #include <mruby/data.h>
-#include <mruby/presym.h>
 #include <mruby/array.h>
 #include <mruby/hash.h>
+#include <mruby/internal.h>
+#include <mruby/presym.h>
 
 static const mrb_code call_iseq[] = {
   OP_CALL,
@@ -51,15 +52,7 @@ mrb_proc_new(mrb_state *mrb, const mrb_irep *irep)
     struct RClass *tc = NULL;
 
     if (ci->proc) {
-      if (ci->proc->color != MRB_GC_RED) {
-        tc = MRB_PROC_TARGET_CLASS(ci->proc);
-      }
-      else {
-        tc = mrb_vm_ci_target_class(ci);
-        if (tc && tc->tt == MRB_TT_ICLASS) {
-          tc = tc->c;
-        }
-      }
+      tc = MRB_PROC_TARGET_CLASS(ci->proc);
     }
     if (tc == NULL) {
       tc = mrb_vm_ci_target_class(ci);
@@ -67,10 +60,10 @@ mrb_proc_new(mrb_state *mrb, const mrb_irep *irep)
     p->upper = ci->proc;
     p->e.target_class = tc;
   }
-  p->body.irep = irep;
   if (irep) {
     mrb_irep_incref(mrb, (mrb_irep*)irep);
   }
+  p->body.irep = irep;
 
   return p;
 }
@@ -79,14 +72,15 @@ struct REnv*
 mrb_env_new(mrb_state *mrb, struct mrb_context *c, mrb_callinfo *ci, int nstacks, mrb_value *stack, struct RClass *tc)
 {
   struct REnv *e;
-  mrb_int bidx;
+  mrb_int bidx = 1;
+  int n = ci->n;
+  int nk = ci->nk;
 
   e = MRB_OBJ_ALLOC(mrb, MRB_TT_ENV, NULL);
   e->c = tc;
   MRB_ENV_SET_LEN(e, nstacks);
-  bidx = ci->argc;
-  if (bidx < 0) bidx = 2;
-  else bidx += 1;
+  bidx += (n == 15) ? 1 : n;
+  bidx += (nk == 15) ? 1 : (2*nk);
   MRB_ENV_SET_BIDX(e, bidx);
   e->mid = ci->mid;
   e->stack = stack;
@@ -200,17 +194,17 @@ mrb_proc_cfunc_env_get(mrb_state *mrb, mrb_int idx)
 }
 
 void
-mrb_proc_copy(struct RProc *a, struct RProc *b)
+mrb_proc_copy(mrb_state *mrb, struct RProc *a, struct RProc *b)
 {
   if (a->body.irep) {
     /* already initialized proc */
     return;
   }
+  if (!MRB_PROC_CFUNC_P(b) && b->body.irep) {
+    mrb_irep_incref(mrb, (mrb_irep*)b->body.irep);
+  }
   a->flags = b->flags;
   a->body = b->body;
-  if (!MRB_PROC_CFUNC_P(a) && a->body.irep) {
-    mrb_irep_incref(NULL, (mrb_irep*)a->body.irep);
-  }
   a->upper = b->upper;
   a->e.env = b->e.env;
   /* a->e.target_class = a->e.target_class; */
@@ -226,7 +220,7 @@ mrb_proc_s_new(mrb_state *mrb, mrb_value proc_class)
   /* Calling Proc.new without a block is not implemented yet */
   mrb_get_args(mrb, "&!", &blk);
   p = MRB_OBJ_ALLOC(mrb, MRB_TT_PROC, mrb_class_ptr(proc_class));
-  mrb_proc_copy(p, mrb_proc_ptr(blk));
+  mrb_proc_copy(mrb, p, mrb_proc_ptr(blk));
   proc = mrb_obj_value(p);
   mrb_funcall_with_block(mrb, proc, MRB_SYM(initialize), 0, NULL, proc);
   if (!MRB_PROC_STRICT_P(p) &&
@@ -236,15 +230,21 @@ mrb_proc_s_new(mrb_state *mrb, mrb_value proc_class)
   return proc;
 }
 
+static void
+check_proc(mrb_state *mrb, mrb_value proc)
+{
+  if (!mrb_proc_p(proc)) {
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "not a proc");
+  }
+}
+
 static mrb_value
 mrb_proc_init_copy(mrb_state *mrb, mrb_value self)
 {
   mrb_value proc = mrb_get_arg1(mrb);
 
-  if (!mrb_proc_p(proc)) {
-    mrb_raise(mrb, E_ARGUMENT_ERROR, "not a proc");
-  }
-  mrb_proc_copy(mrb_proc_ptr(self), mrb_proc_ptr(proc));
+  check_proc(mrb, proc);
+  mrb_proc_copy(mrb, mrb_proc_ptr(self), mrb_proc_ptr(proc));
   return self;
 }
 
@@ -274,13 +274,11 @@ proc_lambda(mrb_state *mrb, mrb_value self)
   if (mrb_nil_p(blk)) {
     mrb_raise(mrb, E_ARGUMENT_ERROR, "tried to create Proc object without a block");
   }
-  if (!mrb_proc_p(blk)) {
-    mrb_raise(mrb, E_ARGUMENT_ERROR, "not a proc");
-  }
+  check_proc(mrb, blk);
   p = mrb_proc_ptr(blk);
   if (!MRB_PROC_STRICT_P(p)) {
     struct RProc *p2 = MRB_OBJ_ALLOC(mrb, MRB_TT_PROC, p->c);
-    mrb_proc_copy(p2, p);
+    mrb_proc_copy(mrb, p2, p);
     p2->flags |= MRB_PROC_STRICT;
     return mrb_obj_value(p2);
   }

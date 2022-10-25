@@ -4,34 +4,15 @@
 #include <mruby/compile.h>
 #include <mruby/error.h>
 #include <mruby/proc.h>
-#include <mruby/presym.h>
 #include <mruby/string.h>
+#include <mruby/internal.h>
+#include <mruby/presym.h>
 
-mrb_noreturn void mrb_method_missing(mrb_state *mrb, mrb_sym name, mrb_value self, mrb_value args);
 void mrb_proc_merge_lvar(mrb_state *mrb, mrb_irep *irep, struct REnv *env, int num, const mrb_sym *lv, const mrb_value *stack);
-mrb_value mrb_exec_irep(mrb_state *mrb, mrb_value self, struct RProc *p);
 const struct RProc *mrb_binding_extract_proc(mrb_state *mrb, mrb_value binding);
 struct REnv *mrb_binding_extract_env(mrb_state *mrb, mrb_value binding);
 typedef mrb_bool mrb_parser_foreach_top_variable_func(mrb_state *mrb, mrb_sym sym, void *user);
 void mrb_parser_foreach_top_variable(mrb_state *mrb, struct mrb_parser_state *p, mrb_parser_foreach_top_variable_func *func, void *user);
-
-static void
-insert_args(mrb_state *mrb, size_t offset, mrb_value obj)
-{
-  mrb_callinfo *ci = mrb->c->ci;
-  mrb_value *argp = ci->stack + 1 /* recv */;
-
-  if (ci->argc < 0) {
-    mrb_ary_splice(mrb, *argp, offset, 0, obj);
-  }
-  else {
-    argp += offset;
-    mrb_stack_extend(mrb, ci->argc + offset + 2 /* recv + block */);
-    memmove(argp + 1 /* obj */, argp, sizeof(mrb_value) * (ci->argc - offset + 1 /* block */));
-    *argp = obj;
-    ci->argc++;
-  }
-}
 
 static void
 binding_eval_error_check(mrb_state *mrb, struct mrb_parser_state *p, const char *file)
@@ -63,7 +44,7 @@ binding_eval_error_check(mrb_state *mrb, struct mrb_parser_state *p, const char 
 struct expand_lvspace {
   mrb_irep *irep;
   struct REnv *env;
-  size_t numvar;
+  int numvar;
   mrb_sym syms[LV_BUFFERS];
 };
 
@@ -133,6 +114,8 @@ binding_eval_prepare(mrb_state *mrb, mrb_value binding)
   mrb_value *argv;
   mrb_get_args(mrb, "s|z*!", &d.expr, &d.exprlen, &d.file, &argv, &argc);
 
+  /* `eval` should take (string[, file, line]) */
+  if (argc > 3) mrb_argnum_error(mrb, argc, 1, 3);
   mrb_bool error;
   mrb_value ret = mrb_protect_error(mrb, binding_eval_prepare_body, &d, &error);
   if (d.pstate) mrb_parser_free(d.pstate);
@@ -147,16 +130,29 @@ mrb_binding_eval(mrb_state *mrb, mrb_value binding)
 
   struct RClass *c = mrb->kernel_module;
   mrb_method_t m = mrb_method_search_vm(mrb, &c, MRB_SYM(eval));
+  mrb_callinfo *ci = mrb->c->ci;
+  int argc = ci->n;
+  mrb_value *argv = ci->stack + 1;
+  struct RProc *proc;
+
+  if (argc < 15) {
+    argv[0] = mrb_ary_new_from_values(mrb, argc, argv);
+    argv[1] = argv[argc];       /* copy block */
+    ci->n = 15;
+  }
   if (MRB_METHOD_UNDEF_P(m)) {
-    int argc = mrb->c->ci->argc;
-    mrb_value *argv = mrb->c->ci->stack + 1;
-    mrb_value args = (argc < 0) ? argv[0] : mrb_ary_new_from_values(mrb, argc, argv);
-    mrb_method_missing(mrb, MRB_SYM(eval), binding, args);
+    mrb_method_missing(mrb, MRB_SYM(eval), binding, argv[0]);
   }
 
-  insert_args(mrb, 1, binding);
-  struct RProc *proc = MRB_METHOD_PROC_P(m) ? MRB_METHOD_PROC(m) : mrb_proc_new_cfunc(mrb, MRB_METHOD_FUNC(m));
-  mrb->c->ci->u.target_class = c;
+  mrb_ary_splice(mrb, argv[0], 1, 0, binding); /* insert binding as 2nd argument */
+  if (MRB_METHOD_FUNC_P(m)) {
+    proc = mrb_proc_new_cfunc(mrb, MRB_METHOD_FUNC(m));
+    MRB_PROC_SET_TARGET_CLASS(proc, c);
+  }
+  else {
+    proc = MRB_METHOD_PROC(m);
+  }
+  ci->u.target_class = c;
   return mrb_exec_irep(mrb, binding, proc);
 }
 

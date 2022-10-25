@@ -98,6 +98,9 @@ assert 'Method#call' do
   }.new
   assert_raise(LocalJumpError) { i.method(:bar).call }
   assert_equal 3, i.method(:bar).call { |i| i }
+
+  assert_raise(ArgumentError) { nil.method(:__id__).call nil, 1 }
+  assert_raise(ArgumentError) { nil.method(:__id__).call nil, opts: 1 }
 end
 
 assert 'Method#call for regression' do
@@ -208,20 +211,33 @@ assert 'Method#to_proc' do
     yield 39
   end
   assert_equal 42, o.bar(&3.method(:+))
+
+  def o.baz(x, y, z, *w, u:, v:, **opts, &blk)
+    { x:, y:, z:, w:, u:, v:, opts:, blk: }
+  end
+  blk = -> { }
+  values = { x: 1, y: 2, z: 3, w: [4, 5, 6], u: 7, v: 8, opts: { s: 9, t: 10 }, blk: blk }
+  assert_equal values, o.method(:baz).to_proc.call(1, 2, 3, 4, 5, 6, u: 7, v: 8, s: 9, t: 10, &blk)
+  assert_equal values, o.method(:baz).to_proc.call(1, 2, 3, 4, 5, 6, **{ u: 7, v: 8, s: 9, t: 10 }, &blk)
+  assert_equal values, o.method(:baz).to_proc.call(*[1, 2, 3, 4, 5, 6], u: 7, v: 8, s: 9, t: 10, &blk)
+  assert_equal values, o.method(:baz).to_proc.call(*[1, 2, 3, 4, 5, 6], **{ u: 7, v: 8, s: 9, t: 10 }, &blk)
+
+  assert_raise(ArgumentError) { nil.method(:__id__).to_proc.call nil, 1 }
+  assert_raise(ArgumentError) { nil.method(:__id__).to_proc.call nil, opts: 1 }
 end
 
 assert 'to_s' do
   o = Object.new
   def o.foo; end
   m = o.method(:foo)
-  assert_equal("#<UnboundMethod: #{ class << o; self; end.inspect }#foo>", m.unbind.inspect)
+  assert_match("#<UnboundMethod: #{ class << o; self; end.inspect }#foo*>", m.unbind.inspect)
 
   c = Class.new
   c.class_eval { def foo; end; }
   m = c.new.method(:foo)
-  assert_equal("#<Method: #{ c.inspect }#foo>", m.inspect)
+  assert_match("#<Method: #{ c.inspect }#foo*>", m.inspect)
   m = c.instance_method(:foo)
-  assert_equal("#<UnboundMethod: #{ c.inspect }#foo>", m.inspect)
+  assert_match("#<UnboundMethod: #{ c.inspect }#foo*>", m.inspect)
 end
 
 assert 'owner' do
@@ -449,4 +465,20 @@ assert 'UnboundMethod#bind_call' do
   assert_equal(0, m.bind_call([]))
   assert_equal(1, m.bind_call([1]))
   assert_equal(2, m.bind_call([1,2]))
+
+  o = Object.new
+  def m(x, y, z, *w, u:, v:, **opts, &blk)
+    { x:, y:, z:, w:, u:, v:, opts:, blk: }
+  end
+  m = o.method(:m).unbind
+  blk = -> { }
+  values = { x: 1, y: 2, z: 3, w: [4, 5, 6], u: 7, v: 8, opts: { s: 9, t: 10 }, blk: blk }
+  assert_equal values, m.bind_call(o, 1, 2, 3, 4, 5, 6, u: 7, v: 8, s: 9, t: 10, &blk)
+  assert_equal values, m.bind_call(o, 1, 2, 3, 4, 5, 6, **{ u: 7, v: 8, s: 9, t: 10 }, &blk)
+  assert_equal values, m.bind_call(o, *[1, 2, 3, 4, 5, 6], u: 7, v: 8, s: 9, t: 10, &blk)
+  assert_equal values, m.bind_call(o, *[1, 2, 3, 4, 5, 6], **{ u: 7, v: 8, s: 9, t: 10 }, &blk)
+  assert_raise(ArgumentError) { m.bind_call }
+
+  assert_raise(ArgumentError) { BasicObject.instance_method(:__id__).bind_call nil, 1 }
+  assert_raise(ArgumentError) { BasicObject.instance_method(:__id__).bind_call nil, opts: 1 }
 end

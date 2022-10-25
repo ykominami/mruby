@@ -21,6 +21,7 @@
 #include <mruby/throw.h>
 #include <mruby/string.h>
 #include <mruby/dump.h>
+#include <mruby/internal.h>
 #include <mruby/presym.h>
 #include "node.h"
 
@@ -90,6 +91,15 @@ intern_gen(parser_state *p, const char *s, size_t len)
 
 #define intern_op(op) MRB_OPSYM_2(p->mrb, op)
 
+static mrb_sym
+intern_numparam_gen(parser_state *p, int num)
+{
+  char buf[3];
+  buf[0] = '_'; buf[1] = '0'+num; buf[2] = '\0';
+  return intern(buf, 2);
+}
+#define intern_numparam(n) intern_numparam_gen(p,(n))
+
 static void
 cons_free_gen(parser_state *p, node *cons)
 {
@@ -109,6 +119,8 @@ parser_palloc(parser_state *p, size_t size)
   return m;
 }
 
+#define parser_pfree(ptr) do { if (sizeof(node) <= sizeof(*(ptr))) cons_free((node*)ptr);} while (0)
+
 static node*
 cons_gen(parser_state *p, node *car, node *cdr)
 {
@@ -119,7 +131,7 @@ cons_gen(parser_state *p, node *car, node *cdr)
     p->cells = p->cells->cdr;
   }
   else {
-    c = (node *)parser_palloc(p, sizeof(mrb_ast_node));
+    c = (node*)parser_palloc(p, sizeof(mrb_ast_node));
   }
 
   c->car = car;
@@ -195,7 +207,7 @@ append_gen(parser_state *p, node *a, node *b)
 static char*
 parser_strndup(parser_state *p, const char *s, size_t len)
 {
-  char *b = (char *)parser_palloc(p, len+1);
+  char *b = (char*)parser_palloc(p, len+1);
 
   memcpy(b, s, len);
   b[len] = '\0';
@@ -299,6 +311,18 @@ static void
 local_add_f(parser_state *p, mrb_sym sym)
 {
   if (p->locals) {
+    node *n = p->locals->car;
+    while (n) {
+      if (sym(n->car) == sym) {
+        mrb_int len;
+        const char* name = mrb_sym_name_len(p->mrb, sym, &len);
+        if (len > 0 && name[0] != '_') {
+          yyerror(p, "duplicated argument name");
+          return;
+        }
+      }
+      n = n->cdr;
+    }
     p->locals->car = push(p->locals->car, nsym(sym));
   }
 }
@@ -315,7 +339,7 @@ static void
 local_add_blk(parser_state *p, mrb_sym blk)
 {
   /* allocate register for block */
-  local_add_f(p, blk ? blk : intern_op(and));
+  local_add_f(p, blk ? blk : 0);
 }
 
 static void
@@ -499,11 +523,16 @@ new_call(parser_state *p, node *a, mrb_sym b, node *c, int pass)
 static node*
 new_fcall(parser_state *p, mrb_sym b, node *c)
 {
-  node *n = new_self(p);
-  NODE_LINENO(n, c);
-  n = list4((node*)NODE_FCALL, n, nsym(b), c);
+  node *n = list4((node*)NODE_FCALL, 0, nsym(b), c);
   NODE_LINENO(n, c);
   return n;
+}
+
+/* (a b . c) */
+static node*
+new_callargs(parser_state *p, node *a, node *b, node *c)
+{
+  return cons(a, cons(b, c));
 }
 
 /* (:super . c) */
@@ -517,7 +546,7 @@ new_super(parser_state *p, node *c)
 static node*
 new_zsuper(parser_state *p)
 {
-  return list1((node*)NODE_ZSUPER);
+  return cons((node*)NODE_ZSUPER, 0);
 }
 
 /* (:yield . c) */
@@ -526,7 +555,12 @@ new_yield(parser_state *p, node *c)
 {
   if (c) {
     if (c->cdr) {
-      yyerror(p, "both block arg and actual block given");
+      if (c->cdr->cdr) {
+        yyerror(p, "both block arg and actual block given");
+      }
+      if (c->cdr->car) {
+        return cons((node*)NODE_YIELD, push(c->car, c->cdr->car));
+      }
     }
     return cons((node*)NODE_YIELD, c->car);
   }
@@ -601,6 +635,7 @@ new_colon3(parser_state *p, mrb_sym c)
 static node*
 new_and(parser_state *p, node *a, node *b)
 {
+  void_expr_error(p, a);
   return cons((node*)NODE_AND, cons(a, b));
 }
 
@@ -608,6 +643,7 @@ new_and(parser_state *p, node *a, node *b)
 static node*
 new_or(parser_state *p, node *a, node *b)
 {
+  void_expr_error(p, a);
   return cons((node*)NODE_OR, cons(a, b));
 }
 
@@ -622,6 +658,7 @@ new_array(parser_state *p, node *a)
 static node*
 new_splat(parser_state *p, node *a)
 {
+  void_expr_error(p, a);
   return cons((node*)NODE_SPLAT, a);
 }
 
@@ -687,9 +724,6 @@ new_cvar(parser_state *p, mrb_sym sym)
 static node*
 new_nvar(parser_state *p, int num)
 {
-  int nvars = intn(p->nvars->car);
-
-  p->nvars->car = nint(nvars > num ? nvars : num);
   return cons((node*)NODE_NVAR, nint(num));
 }
 
@@ -869,9 +903,20 @@ new_kw_arg(parser_state *p, mrb_sym kw, node *def_arg)
 
 /* (:kw_rest_args . a) */
 static node*
-new_kw_rest_args(parser_state *p, node *a)
+new_kw_rest_args(parser_state *p, mrb_sym sym)
 {
-  return cons((node*)NODE_KW_REST_ARGS, a);
+  return cons((node*)NODE_KW_REST_ARGS, nsym(sym));
+}
+
+static node*
+new_args_dots(parser_state *p, node *m)
+{
+  mrb_sym r = intern_op(mul);
+  mrb_sym k = intern_op(pow);
+  mrb_sym b = intern_op(and);
+  local_add_f(p, r);
+  return new_args(p, m, 0, r, 0,
+                  new_args_tail(p, 0, new_kw_rest_args(p, k), b));
 }
 
 /* (:block_arg . a) */
@@ -960,13 +1005,14 @@ new_op_asgn(parser_state *p, node *a, mrb_sym op, node *b)
 static node*
 new_imaginary(parser_state *p, node *imaginary)
 {
-  return new_call(p, new_const(p, MRB_SYM_2(p->mrb, Kernel)), MRB_SYM_2(p->mrb, Complex), list1(list2(list3((node*)NODE_INT, (node*)strdup("0"), nint(10)), imaginary)), 1);
+  return new_call(p, new_const(p, MRB_SYM_2(p->mrb, Kernel)), MRB_SYM_2(p->mrb, Complex),
+                  new_callargs(p, list2(list3((node*)NODE_INT, (node*)strdup("0"), nint(10)), imaginary), 0, 0), '.');
 }
 
 static node*
 new_rational(parser_state *p, node *rational)
 {
-  return new_call(p, new_const(p, MRB_SYM_2(p->mrb, Kernel)), MRB_SYM_2(p->mrb, Rational), list1(list1(rational)), 1);
+  return new_call(p, new_const(p, MRB_SYM_2(p->mrb, Kernel)), MRB_SYM_2(p->mrb, Rational), new_callargs(p, list1(rational), 0, 0), '.');
 }
 
 /* (:int . i) */
@@ -1146,7 +1192,7 @@ new_nth_ref(parser_state *p, int n)
 static node*
 new_heredoc(parser_state *p)
 {
-  parser_heredoc_info *inf = (parser_heredoc_info *)parser_palloc(p, sizeof(parser_heredoc_info));
+  parser_heredoc_info *inf = (parser_heredoc_info*)parser_palloc(p, sizeof(parser_heredoc_info));
   return cons((node*)NODE_HEREDOC, (node*)inf);
 }
 
@@ -1182,24 +1228,24 @@ static node*
 call_uni_op(parser_state *p, node *recv, const char *m)
 {
   void_expr_error(p, recv);
-  return new_call(p, recv, intern_cstr(m), 0, 1);
+  return new_call(p, recv, intern_cstr(m), 0, '.');
 }
 
 /* (:call a op b) */
 static node*
 call_bin_op(parser_state *p, node *recv, const char *m, node *arg1)
 {
-  return new_call(p, recv, intern_cstr(m), list1(list1(arg1)), 1);
+  return new_call(p, recv, intern_cstr(m), new_callargs(p, list1(arg1), 0, 0), '.');
 }
 
 static void
 args_with_block(parser_state *p, node *a, node *b)
 {
   if (b) {
-    if (a->cdr) {
+    if (a->cdr && a->cdr->cdr) {
       yyerror(p, "both block arg and actual block given");
     }
-    a->cdr = b;
+    a->cdr->cdr = b;
   }
 }
 
@@ -1226,19 +1272,16 @@ call_with_block(parser_state *p, node *a, node *b)
   switch (typen(a->car)) {
   case NODE_SUPER:
   case NODE_ZSUPER:
-    if (!a->cdr) a->cdr = cons(0, b);
-    else {
-      args_with_block(p, a->cdr, b);
-    }
+    if (!a->cdr) a->cdr = new_callargs(p, 0, 0, b);
+    else args_with_block(p, a->cdr, b);
     break;
   case NODE_CALL:
   case NODE_FCALL:
   case NODE_SCALL:
-    n = a->cdr->cdr->cdr;
-    if (!n->car) n->car = cons(0, b);
-    else {
-      args_with_block(p, n->car, b);
-    }
+    /* (NODE_CALL recv mid (args kw . blk)) */
+    n = a->cdr->cdr->cdr; /* (args kw . blk) */
+    if (!n->car) n->car = new_callargs(p, 0, 0, b);
+    else args_with_block(p, n->car, b);
     break;
   default:
     break;
@@ -1260,10 +1303,11 @@ cond(node *n)
 static node*
 ret_args(parser_state *p, node *n)
 {
-  if (n->cdr) {
+  if (n->cdr->cdr) {
     yyerror(p, "block argument should not be given");
     return NULL;
   }
+  if (!n->car) return NULL;
   if (!n->car->cdr) return n->car->car;
   return new_array(p, n->car);
 }
@@ -1292,25 +1336,72 @@ var_reference(parser_state *p, node *lhs)
   return lhs;
 }
 
+static node*
+label_reference(parser_state *p, mrb_sym sym)
+{
+  const char *name = mrb_sym_name(p->mrb, sym);
+  node *n;
+
+  if (local_var_p(p, sym)) {
+    n = new_lvar(p, sym);
+  }
+  else if (ISUPPER(name[0])) {
+    n = new_const(p, sym);
+  }
+  else {
+    n = new_fcall(p, sym, 0);
+  }
+  return n;
+}
+
 typedef enum mrb_string_type  string_type;
 
-static node*
+typedef struct parser_lex_strterm {
+  int type;
+  int level;
+  int term;
+  int paren;
+  struct parser_lex_strterm *prev;
+} parser_lex_strterm;
+
+static parser_lex_strterm*
 new_strterm(parser_state *p, string_type type, int term, int paren)
 {
-  return cons(nint(type), cons(nint(0), cons(nint(paren), nint(term))));
+  parser_lex_strterm *lex = (parser_lex_strterm*)parser_palloc(p, sizeof(parser_lex_strterm));
+  lex->type = type;
+  lex->level = 0;
+  lex->term = term;
+  lex->paren = paren;
+  lex->prev = p->lex_strterm;
+  return lex;
 }
 
 static void
 end_strterm(parser_state *p)
 {
-  cons_free(p->lex_strterm->cdr->cdr);
-  cons_free(p->lex_strterm->cdr);
-  cons_free(p->lex_strterm);
+  parser_lex_strterm *term = p->lex_strterm->prev;
+  parser_pfree(p->lex_strterm);
+  p->lex_strterm = term;
+}
+
+static node*
+push_strterm(parser_state *p)
+{
+  node *n = cons((node*)p->lex_strterm, p->parsing_heredoc);
   p->lex_strterm = NULL;
+  return n;
+}
+
+static void
+pop_strterm(parser_state *p, node *n)
+{
+  p->lex_strterm = (parser_lex_strterm*)n->car;
+  p->parsing_heredoc = n->cdr;
+  cons_free(n);
 }
 
 static parser_heredoc_info *
-parsing_heredoc_inf(parser_state *p)
+parsing_heredoc_info(parser_state *p)
 {
   node *nd = p->parsing_heredoc;
   if (nd == NULL)
@@ -1322,45 +1413,12 @@ parsing_heredoc_inf(parser_state *p)
 static void
 heredoc_treat_nextline(parser_state *p)
 {
-  if (p->heredocs_from_nextline == NULL)
-    return;
-  if (p->parsing_heredoc == NULL) {
-    node *n;
-    p->parsing_heredoc = p->heredocs_from_nextline;
-    p->lex_strterm_before_heredoc = p->lex_strterm;
-    p->lex_strterm = new_strterm(p, parsing_heredoc_inf(p)->type, 0, 0);
-    n = p->all_heredocs;
-    if (n) {
-      while (n->cdr)
-        n = n->cdr;
-      n->cdr = p->parsing_heredoc;
-    }
-    else {
-      p->all_heredocs = p->parsing_heredoc;
-    }
+  if (p->heredocs_from_nextline == NULL) return;
+  if (p->parsing_heredoc && p->lex_strterm) {
+    append(p->heredocs_from_nextline, p->parsing_heredoc);
   }
-  else {
-    node *n, *m;
-    m = p->heredocs_from_nextline;
-    while (m->cdr)
-      m = m->cdr;
-    n = p->all_heredocs;
-    mrb_assert(n != NULL);
-    if (n == p->parsing_heredoc) {
-      m->cdr = n;
-      p->all_heredocs = p->heredocs_from_nextline;
-      p->parsing_heredoc = p->heredocs_from_nextline;
-    }
-    else {
-      while (n->cdr != p->parsing_heredoc) {
-        n = n->cdr;
-        mrb_assert(n != NULL);
-      }
-      m->cdr = n->cdr;
-      n->cdr = p->heredocs_from_nextline;
-      p->parsing_heredoc = p->heredocs_from_nextline;
-    }
-  }
+  p->parsing_heredoc = p->heredocs_from_nextline;
+  p->lex_strterm = new_strterm(p, parsing_heredoc_info(p)->type, 0, 0);
   p->heredocs_from_nextline = NULL;
 }
 
@@ -1371,15 +1429,13 @@ heredoc_end(parser_state *p)
   if (p->parsing_heredoc == NULL) {
     p->lstate = EXPR_BEG;
     end_strterm(p);
-    p->lex_strterm = p->lex_strterm_before_heredoc;
-    p->lex_strterm_before_heredoc = NULL;
   }
   else {
     /* next heredoc */
-    p->lex_strterm->car = nint(parsing_heredoc_inf(p)->type);
+    p->lex_strterm->type = parsing_heredoc_info(p)->type;
   }
 }
-#define is_strterm_type(p,str_func) (intn((p)->lex_strterm->car) & (str_func))
+#define is_strterm_type(p,str_func) ((p)->lex_strterm->type & (str_func))
 
 /* xxx ----------------------------- */
 
@@ -1717,7 +1773,6 @@ stmt            : keyword_alias fsym {p->lstate = EXPR_FNAME;} fsym
                 | arg tASSOC tIDENTIFIER
                     {
                       node *lhs = new_lvar(p, $3);
-                      void_expr_error(p, $1);
                       assignable(p, lhs);
                       $$ = new_asgn(p, lhs, $1);
                     }
@@ -1767,7 +1822,6 @@ command_asgn    : lhs '=' command_rhs
                       $$ = $1;
                       endless_method_name(p, $1);
                       void_expr_error(p, $4);
-                      void_expr_error(p, $6);
                       defn_setup(p, $$, $2, new_mod_rescue(p, $4, $6));
                       nvars_unnest(p);
                       p->in_def--;
@@ -1785,7 +1839,6 @@ command_asgn    : lhs '=' command_rhs
                     {
                       $$ = $1;
                       void_expr_error(p, $4);
-                      void_expr_error(p, $6);
                       defs_setup(p, $$, $2, new_mod_rescue(p, $4, $6));
                       nvars_unnest(p);
                       p->in_def--;
@@ -2402,7 +2455,6 @@ arg             : lhs '=' arg_rhs
                       $$ = $1;
                       endless_method_name(p, $1);
                       void_expr_error(p, $4);
-                      void_expr_error(p, $6);
                       defn_setup(p, $$, $2, new_mod_rescue(p, $4, $6));
                       nvars_unnest(p);
                       p->in_def--;
@@ -2420,7 +2472,6 @@ arg             : lhs '=' arg_rhs
                     {
                       $$ = $1;
                       void_expr_error(p, $4);
-                      void_expr_error(p, $6);
                       defs_setup(p, $$, $2, new_mod_rescue(p, $4, $6));
                       nvars_unnest(p);
                       p->in_def--;
@@ -2440,7 +2491,7 @@ aref_args       : none
                     }
                 | args comma assocs trailer
                     {
-                      $$ = push($1, new_kw_hash(p, $3));
+                      $$ = push($1, new_hash(p, $3));
                     }
                 | assocs trailer
                     {
@@ -2456,7 +2507,6 @@ arg_rhs         : arg %prec tOP_ASGN
                 | arg modifier_rescue arg
                     {
                       void_expr_error(p, $1);
-                      void_expr_error(p, $3);
                       $$ = new_mod_rescue(p, $1, $3);
                     }
                 ;
@@ -2467,39 +2517,23 @@ paren_args      : '(' opt_call_args ')'
                     }
                 | '(' args comma tBDOT3 rparen
                     {
-#if 1
-                      mrb_sym r = intern_op(mul);
-                      mrb_sym b = intern_op(and);
-                      $$ = cons(push($2, new_splat(p, new_lvar(p, r))),
-                                new_block_arg(p, new_lvar(p, b)));
-#else
                       mrb_sym r = intern_op(mul);
                       mrb_sym k = intern_op(pow);
                       mrb_sym b = intern_op(and);
-                      $$ = cons(list2(push($2, new_splat(p, new_lvar(p, r))),
-                                      new_kw_hash(p, list1(cons(new_kw_rest_args(p, 0), new_lvar(p, k))))),
-                                new_block_arg(p, new_lvar(p, b)));
-#endif
+                      $$ = new_callargs(p, push($2, new_splat(p, new_lvar(p, r))),
+                                        new_kw_hash(p, list1(cons(new_kw_rest_args(p, 0), new_lvar(p, k)))),
+                                        new_block_arg(p, new_lvar(p, b)));
                     }
                 | '(' tBDOT3 rparen
                     {
-#if 1
-                      mrb_sym r = intern_op(mul);
-                      mrb_sym b = intern_op(and);
-                      if (local_var_p(p, r)  && local_var_p(p, b)) {
-                        $$ = cons(list1(new_splat(p, new_lvar(p, r))),
-                                  new_block_arg(p, new_lvar(p, b)));
-                      }
-#else
                       mrb_sym r = intern_op(mul);
                       mrb_sym k = intern_op(pow);
                       mrb_sym b = intern_op(and);
                       if (local_var_p(p, r) && local_var_p(p, k) && local_var_p(p, b)) {
-                        $$ = cons(list2(new_splat(p, new_lvar(p, r)),
-                                        new_kw_hash(p, list1(cons(new_kw_rest_args(p, 0), new_lvar(p, k))))),
-                                  new_block_arg(p, new_lvar(p, b)));
+                        $$ = new_callargs(p, list1(new_splat(p, new_lvar(p, r))),
+                                          new_kw_hash(p, list1(cons(new_kw_rest_args(p, 0), new_lvar(p, k)))),
+                                          new_block_arg(p, new_lvar(p, b)));
                       }
-#endif
                       else {
                         yyerror(p, "unexpected argument forwarding ...");
                         $$ = 0;
@@ -2515,17 +2549,17 @@ opt_call_args   : none
                 | call_args opt_terms
                 | args comma
                     {
-                      $$ = cons($1,0);
+                      $$ = new_callargs(p,$1,0,0);
                       NODE_LINENO($$, $1);
                     }
                 | args comma assocs comma
                     {
-                      $$ = cons(push($1, new_kw_hash(p, $3)), 0);
+                      $$ = new_callargs(p,$1,new_kw_hash(p,$3),0);
                       NODE_LINENO($$, $1);
                     }
                 | assocs comma
                     {
-                      $$ = cons(list1(new_kw_hash(p, $1)), 0);
+                      $$ = new_callargs(p,0,new_kw_hash(p,$1),0);
                       NODE_LINENO($$, $1);
                     }
                 ;
@@ -2533,27 +2567,27 @@ opt_call_args   : none
 call_args       : command
                     {
                       void_expr_error(p, $1);
-                      $$ = cons(list1($1), 0);
+                      $$ = new_callargs(p, list1($1), 0, 0);
                       NODE_LINENO($$, $1);
                     }
                 | args opt_block_arg
                     {
-                      $$ = cons($1, $2);
+                      $$ = new_callargs(p, $1, 0, $2);
                       NODE_LINENO($$, $1);
                     }
                 | assocs opt_block_arg
                     {
-                      $$ = cons(list1(new_kw_hash(p, $1)), $2);
+                      $$ = new_callargs(p, 0, new_kw_hash(p, $1), $2);
                       NODE_LINENO($$, $1);
                     }
                 | args comma assocs opt_block_arg
                     {
-                      $$ = cons(push($1, new_kw_hash(p, $3)), $4);
+                      $$ = new_callargs(p, $1, new_kw_hash(p, $3), $4);
                       NODE_LINENO($$, $1);
                     }
                 | block_arg
                     {
-                      $$ = cons(0, $1);
+                      $$ = new_callargs(p, 0, 0, $1);
                       NODE_LINENO($$, $1);
                     }
                 ;
@@ -2573,6 +2607,10 @@ block_arg       : tAMPER arg
                     {
                       $$ = new_block_arg(p, $2);
                     }
+                | tAMPER
+                    {
+                      $$ = new_block_arg(p, 0);
+                    }
                 ;
 
 opt_block_arg   : comma block_arg
@@ -2591,13 +2629,16 @@ comma           : ','  opt_nl
 args            : arg
                     {
                       void_expr_error(p, $1);
-                      $$ = cons($1, 0);
+                      $$ = list1($1);
                       NODE_LINENO($$, $1);
+                    }
+                | tSTAR
+                    {
+                      $$ = list1(new_splat(p, new_lvar(p, intern_op(mul))));
                     }
                 | tSTAR arg
                     {
-                      void_expr_error(p, $2);
-                      $$ = cons(new_splat(p, $2), 0);
+                      $$ = list1(new_splat(p, $2));
                       NODE_LINENO($$, $2);
                     }
                 | args comma arg
@@ -2607,7 +2648,6 @@ args            : arg
                     }
                 | args comma tSTAR arg
                     {
-                      void_expr_error(p, $4);
                       $$ = push($1, new_splat(p, $4));
                     }
                 ;
@@ -2619,12 +2659,10 @@ mrhs            : args comma arg
                     }
                 | args comma tSTAR arg
                     {
-                      void_expr_error(p, $4);
                       $$ = push($1, new_splat(p, $4));
                     }
                 | tSTAR arg
                     {
-                      void_expr_error(p, $2);
                       $$ = list1(new_splat(p, $2));
                     }
                 ;
@@ -2709,7 +2747,7 @@ primary         : literal
                     }
                 | operation brace_block
                     {
-                      $$ = new_fcall(p, $1, cons(0, $2));
+                      $$ = new_fcall(p, $1, new_callargs(p, 0, 0, $2));
                     }
                 | method_call
                 | method_call brace_block
@@ -2720,6 +2758,7 @@ primary         : literal
                 | tLAMBDA
                     {
                       local_nest(p);
+                      nvars_nest(p);
                       $<num>$ = p->lpar_beg;
                       p->lpar_beg = ++p->paren_nest;
                     }
@@ -2733,6 +2772,7 @@ primary         : literal
                       p->lpar_beg = $<num>2;
                       $$ = new_lambda(p, $3, $5);
                       local_unnest(p);
+                      nvars_unnest(p);
                       p->cmdarg_stack = $<stack>4;
                       CMDARG_LEXPOP();
                     }
@@ -2932,7 +2972,7 @@ f_margs         : f_arg
                     }
                 | f_arg ',' tSTAR
                     {
-                      local_add_f(p, 0);
+                      local_add_f(p, intern_op(mul));
                       $$ = list3($1, nint(-1), 0);
                     }
                 | f_arg ',' tSTAR ',' f_arg
@@ -2949,12 +2989,12 @@ f_margs         : f_arg
                     }
                 | tSTAR
                     {
-                      local_add_f(p, 0);
+                      local_add_f(p, intern_op(mul));
                       $$ = list3(0, nint(-1), 0);
                     }
                 | tSTAR ','
                     {
-                      local_add_f(p, 0);
+                      local_add_f(p, intern_op(mul));
                     }
                   f_arg
                     {
@@ -3308,6 +3348,9 @@ string_fragment : tCHAR
                       if (intn($3->cdr->cdr) > 0) {
                         n = push(n, $3);
                       }
+                      else {
+                        cons_free($3);
+                      }
                       $$ = new_dstr(p, n);
                     }
                 ;
@@ -3325,13 +3368,12 @@ string_interp   : tSTRING_MID
                     }
                 | tSTRING_PART
                     {
-                      $<nd>$ = p->lex_strterm;
-                      p->lex_strterm = NULL;
+                      $<nd>$ = push_strterm(p);
                     }
                   compstmt
                   '}'
                     {
-                      p->lex_strterm = $<nd>2;
+                      pop_strterm(p,$<nd>2);
                       $$ = list2($1, $3);
                     }
                 | tLITERAL_DELIM
@@ -3353,6 +3395,9 @@ xstring         : tXSTRING_BEG tXSTRING
                       node *n = $2;
                       if (intn($3->cdr->cdr) > 0) {
                         n = push(n, $3);
+                      }
+                      else {
+                        cons_free($3);
                       }
                       $$ = new_dxstr(p, n);
                     }
@@ -3377,8 +3422,8 @@ heredoc_bodies  : heredoc_body
 
 heredoc_body    : tHEREDOC_END
                     {
-                      parser_heredoc_info * inf = parsing_heredoc_inf(p);
-                      inf->doc = push(inf->doc, new_str(p, "", 0));
+                      parser_heredoc_info *info = parsing_heredoc_info(p);
+                      info->doc = push(info->doc, new_str(p, "", 0));
                       heredoc_end(p);
                     }
                 | heredoc_string_rep tHEREDOC_END
@@ -3393,21 +3438,20 @@ heredoc_string_rep : heredoc_string_interp
 
 heredoc_string_interp : tHD_STRING_MID
                     {
-                      parser_heredoc_info * inf = parsing_heredoc_inf(p);
-                      inf->doc = push(inf->doc, $1);
+                      parser_heredoc_info *info = parsing_heredoc_info(p);
+                      info->doc = push(info->doc, $1);
                       heredoc_treat_nextline(p);
                     }
                 | tHD_STRING_PART
                     {
-                      $<nd>$ = p->lex_strterm;
-                      p->lex_strterm = NULL;
+                      $<nd>$ = push_strterm(p);
                     }
                   compstmt
                   '}'
                     {
-                      parser_heredoc_info * inf = parsing_heredoc_inf(p);
-                      p->lex_strterm = $<nd>2;
-                      inf->doc = push(push(inf->doc, $1), $3);
+                      pop_strterm(p, $<nd>2);
+                      parser_heredoc_info *info = parsing_heredoc_info(p);
+                      info->doc = push(push(info->doc, $1), $3);
                     }
                 ;
 
@@ -3420,6 +3464,9 @@ words           : tWORDS_BEG tSTRING
                       node *n = $2;
                       if (intn($3->cdr->cdr) > 0) {
                         n = push(n, $3);
+                      }
+                      else {
+                        cons_free($3);
                       }
                       $$ = new_words(p, n);
                     }
@@ -3437,6 +3484,9 @@ symbol          : basic_symbol
                       p->lstate = EXPR_ENDARG;
                       if (intn($4->cdr->cdr) > 0) {
                         n = push(n, $4);
+                      }
+                      else {
+                        cons_free($4);
                       }
                       $$ = new_dsym(p, new_dstr(p, n));
                     }
@@ -3557,12 +3607,7 @@ var_ref         : variable
                     }
                 | keyword__ENCODING__
                     {
-#ifdef MRB_UTF8_STRING
-                      const char *enc = "UTF-8";
-#else
-                      const char *enc = "ASCII-8BIT";
-#endif
-                      $$ = new_str(p, enc, strlen(enc));
+                      $$ = new_fcall(p, MRB_SYM_2(p->mrb, __ENCODING__), 0);
                     }
                 ;
 
@@ -3603,39 +3648,11 @@ f_arglist_paren : '(' f_args rparen
                     }
                 | '(' f_arg ',' tBDOT3 rparen
                     {
-#if 1
-                      /* til real keyword args implemented */
-                      mrb_sym r = intern_op(mul);
-                      mrb_sym b = intern_op(and);
-                      local_add_f(p, r);
-                      $$ = new_args(p, $2, 0, r, 0,
-                                    new_args_tail(p, 0, 0, b));
-#else
-                      mrb_sym r = intern_op(mul);
-                      mrb_sym k = intern_op(pow);
-                      mrb_sym b = intern_op(and);
-                      local_add_f(p, r); local_add_f(p, k);
-                      $$ = new_args(p, $2, 0, r, 0,
-                                    new_args_tail(p, 0, new_kw_rest_args(p, nsym(k)), b));
-#endif
+                      $$ = new_args_dots(p, $2);
                     }
                 | '(' tBDOT3 rparen
                     {
-#if 1
-                      /* til real keyword args implemented */
-                      mrb_sym r = intern_op(mul);
-                      mrb_sym b = intern_op(and);
-                      local_add_f(p, r);
-                      $$ = new_args(p, 0, 0, r, 0,
-                                    new_args_tail(p, 0, 0, b));
-#else
-                      mrb_sym r = intern_op(mul);
-                      mrb_sym k = intern_op(pow);
-                      mrb_sym b = intern_op(and);
-                      local_add_f(p, r); local_add_f(p, k);
-                      $$ = new_args(p, 0, 0, r, 0,
-                                    new_args_tail(p, 0, new_kw_rest_args(p, nsym(k)), b));
-#endif
+                      $$ = new_args_dots(p, 0);
                     }
                 ;
 
@@ -3644,9 +3661,21 @@ f_arglist       : f_arglist_paren
                     {
                       $$ = $1;
                     }
+                | f_arg ',' tBDOT3 term
+                    {
+                      $$ = new_args_dots(p, $1);
+                    }
+                | tDOT3 term
+                    {
+                      $$ = new_args_dots(p, 0);
+                    }
                 ;
 
 f_label         : tIDENTIFIER tLABEL_TAG
+                    {
+                      local_nest(p);
+                    }
+                | tNUMPARAM tLABEL_TAG
                     {
                       local_nest(p);
                     }
@@ -3667,6 +3696,7 @@ f_kw            : f_label arg
 
 f_block_kw      : f_label primary_value
                     {
+                      void_expr_error(p, $2);
                       $$ = new_kw_arg(p, $1, cons($2, locals_node(p)));
                       local_unnest(p);
                     }
@@ -3703,7 +3733,7 @@ kwrest_mark     : tPOW
 
 f_kwrest        : kwrest_mark tIDENTIFIER
                     {
-                      $$ = new_kw_rest_args(p, nsym($2));
+                      $$ = new_kw_rest_args(p, $2);
                     }
                 | kwrest_mark
                     {
@@ -3797,7 +3827,7 @@ f_args          : f_arg ',' f_optarg ',' f_rest_arg opt_args_tail
                     }
                 | /* none */
                     {
-                      local_add_f(p, intern_op(and));
+                      local_add_f(p, 0);
                       $$ = new_args(p, 0, 0, 0, 0, 0);
                     }
                 ;
@@ -3921,8 +3951,8 @@ f_rest_arg      : restarg_mark tIDENTIFIER
                     }
                 | restarg_mark
                     {
-                      local_add_f(p, intern_op(mul));
-                      $$ = -1;
+                      $$ = intern_op(mul);
+                      local_add_f(p, $$);
                     }
                 ;
 
@@ -3933,6 +3963,10 @@ blkarg_mark     : '&'
 f_block_arg     : blkarg_mark tIDENTIFIER
                     {
                       $$ = $2;
+                    }
+                | blkarg_mark
+                    {
+                      $$ = intern_op(and);
                     }
                 ;
 
@@ -4007,7 +4041,17 @@ assoc           : arg tASSOC arg
                     }
                 | tIDENTIFIER tLABEL_TAG
                     {
-                      $$ = cons(new_sym(p, $1), new_lvar(p, $1));
+                      $$ = cons(new_sym(p, $1), label_reference(p, $1));
+                    }
+                | tNUMPARAM tLABEL_TAG
+                    {
+                      mrb_sym sym = intern_numparam($1);
+                      $$ = cons(new_sym(p, sym), label_reference(p, sym));
+                    }
+                | tNUMPARAM tLABEL_TAG arg
+                    {
+                      void_expr_error(p, $3);
+                      $$ = cons(new_sym(p, intern_numparam($1)), $3);
                     }
                 | string_fragment tLABEL_TAG arg
                     {
@@ -4023,6 +4067,10 @@ assoc           : arg tASSOC arg
                     {
                       void_expr_error(p, $2);
                       $$ = cons(new_kw_rest_args(p, 0), $2);
+                    }
+                | tDSTAR
+                    {
+                      $$ = cons(new_kw_rest_args(p, 0), new_lvar(p, intern_op(pow)));
                     }
                 ;
 
@@ -4122,7 +4170,7 @@ yyerror(parser_state *p, const char *s)
   }
   else if (p->nerr < sizeof(p->error_buffer) / sizeof(p->error_buffer[0])) {
     n = strlen(s);
-    c = (char *)parser_palloc(p, n + 1);
+    c = (char*)parser_palloc(p, n + 1);
     memcpy(c, s, n + 1);
     p->error_buffer[p->nerr].message = c;
     p->error_buffer[p->nerr].lineno = p->lineno;
@@ -4161,7 +4209,7 @@ yywarning(parser_state *p, const char *s)
   }
   else if (p->nwarn < sizeof(p->warn_buffer) / sizeof(p->warn_buffer[0])) {
     n = strlen(s);
-    c = (char *)parser_palloc(p, n + 1);
+    c = (char*)parser_palloc(p, n + 1);
     memcpy(c, s, n + 1);
     p->warn_buffer[p->nwarn].message = c;
     p->warn_buffer[p->nwarn].lineno = p->lineno;
@@ -4242,22 +4290,20 @@ static mrb_bool skips(parser_state *p, const char *s);
 static inline int
 nextc0(parser_state *p)
 {
-  int c;
-
   if (p->s && p->s < p->send) {
-    c = (unsigned char)*p->s++;
+    return (unsigned char)*p->s++;
   }
   else {
 #ifndef MRB_NO_STDIO
+    int c;
+
     if (p->f) {
       c = fgetc(p->f);
-      if (feof(p->f)) return -1;
+      if (!feof(p->f)) return c;
     }
-    else
 #endif
-      return -1;
+    return -1;
   }
-  return c;
 }
 
 static inline int
@@ -4662,7 +4708,7 @@ read_escape(parser_state *p)
       c = read_escape_unicode(p, 4);
       if (c < 0) return 0;
     }
-  return -c;
+    return -c;
 
   case 'b':/* backspace */
     return '\010';
@@ -4711,7 +4757,7 @@ read_escape(parser_state *p)
 }
 
 static void
-heredoc_count_indent(parser_heredoc_info *hinf, const char *str, size_t len, size_t spaces, size_t *offset)
+heredoc_count_indent(parser_heredoc_info *hinfo, const char *str, size_t len, size_t spaces, size_t *offset)
 {
   size_t indent = 0;
   *offset = 0;
@@ -4726,7 +4772,7 @@ heredoc_count_indent(parser_heredoc_info *hinf, const char *str, size_t len, siz
     else
       break;
     size_t nindent = indent + size;
-    if (nindent > spaces || nindent > hinf->indent)
+    if (nindent > spaces || nindent > hinfo->indent)
       break;
     indent = nindent;
     *offset += 1;
@@ -4734,14 +4780,14 @@ heredoc_count_indent(parser_heredoc_info *hinf, const char *str, size_t len, siz
 }
 
 static void
-heredoc_remove_indent(parser_state *p, parser_heredoc_info *hinf)
+heredoc_remove_indent(parser_state *p, parser_heredoc_info *hinfo)
 {
-  if (!hinf->remove_indent || hinf->indent == 0)
+  if (!hinfo->remove_indent || hinfo->indent == 0)
     return;
   node *indented, *n, *pair, *escaped, *nspaces;
   const char *str;
   size_t len, spaces, offset, start, end;
-  indented = hinf->indented;
+  indented = hinfo->indented;
   while (indented) {
     n = indented->car;
     pair = n->car;
@@ -4758,7 +4804,7 @@ heredoc_remove_indent(parser_state *p, parser_heredoc_info *hinf)
         if (end > len) end = len;
         spaces = (size_t)nspaces->car;
         size_t esclen = end - start;
-        heredoc_count_indent(hinf, str + start, esclen, spaces, &offset);
+        heredoc_count_indent(hinfo, str + start, esclen, spaces, &offset);
         esclen -= offset;
         memcpy(newstr + newlen, str + start + offset, esclen);
         newlen += esclen;
@@ -4773,7 +4819,7 @@ heredoc_remove_indent(parser_state *p, parser_heredoc_info *hinf)
       pair->cdr = (node*)newlen;
     } else {
       spaces = (size_t)nspaces->car;
-      heredoc_count_indent(hinf, str, len, spaces, &offset);
+      heredoc_count_indent(hinfo, str, len, spaces, &offset);
       pair->car = (node*)(str + offset);
       pair->cdr = (node*)(len - offset);
     }
@@ -4782,13 +4828,13 @@ heredoc_remove_indent(parser_state *p, parser_heredoc_info *hinf)
 }
 
 static void
-heredoc_push_indented(parser_state *p, parser_heredoc_info *hinf, node *pair, node *escaped, node *nspaces, mrb_bool empty_line)
+heredoc_push_indented(parser_state *p, parser_heredoc_info *hinfo, node *pair, node *escaped, node *nspaces, mrb_bool empty_line)
 {
-  hinf->indented = push(hinf->indented, cons(pair, cons(escaped, nspaces)));
+  hinfo->indented = push(hinfo->indented, cons(pair, cons(escaped, nspaces)));
   while (nspaces) {
     size_t tspaces = (size_t)nspaces->car;
-    if ((hinf->indent == ~0U || tspaces < hinf->indent) && !empty_line)
-      hinf->indent = tspaces;
+    if ((hinfo->indent == ~0U || tspaces < hinfo->indent) && !empty_line)
+      hinfo->indent = tspaces;
     nspaces = nspaces->cdr;
   }
 }
@@ -4797,14 +4843,14 @@ static int
 parse_string(parser_state *p)
 {
   int c;
-  string_type type = (string_type)(intptr_t)p->lex_strterm->car;
-  int nest_level = intn(p->lex_strterm->cdr->car);
-  int beg = intn(p->lex_strterm->cdr->cdr->car);
-  int end = intn(p->lex_strterm->cdr->cdr->cdr);
-  parser_heredoc_info *hinf = (type & STR_FUNC_HEREDOC) ? parsing_heredoc_inf(p) : NULL;
+  string_type type = (string_type)p->lex_strterm->type;
+  int nest_level = p->lex_strterm->level;
+  int beg = p->lex_strterm->paren;
+  int end = p->lex_strterm->term;
+  parser_heredoc_info *hinfo = (type & STR_FUNC_HEREDOC) ? parsing_heredoc_info(p) : NULL;
 
-  mrb_bool unindent = hinf && hinf->remove_indent;
-  mrb_bool head = hinf && hinf->line_head;
+  mrb_bool unindent = hinfo && hinfo->remove_indent;
+  mrb_bool head = hinfo && hinfo->line_head;
   mrb_bool empty = TRUE;
   size_t spaces = 0;
   size_t pos = -1;
@@ -4816,26 +4862,26 @@ parse_string(parser_state *p)
   newtok(p);
   while ((c = nextc(p)) != end || nest_level != 0) {
     pos++;
-    if (hinf && (c == '\n' || c < 0)) {
+    if (hinfo && (c == '\n' || c < 0)) {
       mrb_bool line_head;
       tokadd(p, '\n');
       tokfix(p);
       p->lineno++;
       p->column = 0;
-      line_head = hinf->line_head;
-      hinf->line_head = TRUE;
+      line_head = hinfo->line_head;
+      hinfo->line_head = TRUE;
       if (line_head) {
         /* check whether end of heredoc */
         const char *s = tok(p);
         int len = toklen(p);
-        if (hinf->allow_indent) {
+        if (hinfo->allow_indent) {
           while (ISSPACE(*s) && len > 0) {
             ++s;
             --len;
           }
         }
-        if ((len-1 == hinf->term_len) && (strncmp(s, hinf->term, len-1) == 0)) {
-          heredoc_remove_indent(p, hinf);
+        if (hinfo->term_len > 0 && len-1 == hinfo->term_len && strncmp(s, hinfo->term, len-1) == 0) {
+          heredoc_remove_indent(p, hinfo);
           return tHEREDOC_END;
         }
       }
@@ -4844,11 +4890,11 @@ parse_string(parser_state *p)
         const char s1[] = "can't find heredoc delimiter \"";
         const char s2[] = "\" anywhere before EOF";
 
-        if (sizeof(s1)+sizeof(s2)+strlen(hinf->term)+1 >= sizeof(buf)) {
+        if (sizeof(s1)+sizeof(s2)+strlen(hinfo->term)+1 >= sizeof(buf)) {
           yyerror(p, "can't find heredoc delimiter anywhere before EOF");
         } else {
           strcpy(buf, s1);
-          strcat(buf, hinf->term);
+          strcat(buf, hinfo->term);
           strcat(buf, s2);
           yyerror(p, buf);
         }
@@ -4858,7 +4904,7 @@ parse_string(parser_state *p)
       pylval.nd = nd;
       if (unindent && head) {
         nspaces = push(nspaces, nint(spaces));
-        heredoc_push_indented(p, hinf, nd->cdr, escaped, nspaces, empty && line_head);
+        heredoc_push_indented(p, hinfo, nd->cdr, escaped, nspaces, empty && line_head);
       }
       return tHD_STRING_MID;
     }
@@ -4876,11 +4922,11 @@ parse_string(parser_state *p)
     }
     else if (c == beg) {
       nest_level++;
-      p->lex_strterm->cdr->car = nint(nest_level);
+      p->lex_strterm->level = nest_level;
     }
     else if (c == end) {
       nest_level--;
-      p->lex_strterm->cdr->car = nint(nest_level);
+      p->lex_strterm->level = nest_level;
     }
     else if (c == '\\') {
       c = nextc(p);
@@ -4917,14 +4963,14 @@ parse_string(parser_state *p)
             if (c < 0) break;
             tokadd(p, -c);
           }
-          if (hinf)
-            hinf->line_head = FALSE;
+          if (hinfo)
+            hinfo->line_head = FALSE;
         }
         else {
           pushback(p, c);
           tokadd(p, read_escape(p));
-          if (hinf)
-            hinf->line_head = FALSE;
+          if (hinfo)
+            hinfo->line_head = FALSE;
         }
       }
       else {
@@ -4949,12 +4995,12 @@ parse_string(parser_state *p)
         p->cmd_start = TRUE;
         node *nd = new_str(p, tok(p), toklen(p));
         pylval.nd = nd;
-        if (hinf) {
+        if (hinfo) {
           if (unindent && head) {
             nspaces = push(nspaces, nint(spaces));
-            heredoc_push_indented(p, hinf, nd->cdr, escaped, nspaces, FALSE);
+            heredoc_push_indented(p, hinfo, nd->cdr, escaped, nspaces, FALSE);
           }
-          hinf->line_head = FALSE;
+          hinfo->line_head = FALSE;
           return tHD_STRING_PART;
         }
         return tSTRING_PART;
@@ -5684,7 +5730,7 @@ parser_yylex(parser_state *p)
   case '.':
     {
       int is_beg = IS_BEG();
-      p->lstate = EXPR_BEG;
+      p->lstate = EXPR_MID;
       if ((c = nextc(p)) == '.') {
         if ((c = nextc(p)) == '.') {
           return is_beg ? tBDOT3 : tDOT3;
@@ -5693,6 +5739,7 @@ parser_yylex(parser_state *p)
         return is_beg ? tBDOT2 : tDOT2;
       }
       pushback(p, c);
+      p->lstate = EXPR_BEG;
       if (c >= 0 && ISDIGIT(c)) {
         yyerror(p, "no .<digit> floating literal anymore; put 0 before dot");
       }
@@ -6406,16 +6453,16 @@ parser_yylex(parser_state *p)
             nvars = nvars->cdr;
           }
           nvar = intn(p->nvars->car);
-          if (nvar == -1) {
-            yywarning(p, "numbered parameter used in inner block");
-          }
-          if (nvar >= -1) {
+          if (nvar != -2) {     /* numbered parameters never appear on toplevel */
+            if (nvar == -1) {
+              yywarning(p, "numbered parameter used in inner block");
+            }
+            else {
+              p->nvars->car = nint(nvar > n ? nvar : n);
+            }
             pylval.num = n;
             p->lstate = EXPR_END;
             return tNUMPARAM;
-          }
-          else {
-            yywarning(p, "identifier for numbered parameter; consider another name");
           }
         }
       }
@@ -6490,7 +6537,7 @@ parser_yylex(parser_state *p)
               return keyword_do_block;
             return keyword_do;
           }
-          if (state == EXPR_BEG || state == EXPR_VALUE)
+          if (state == EXPR_BEG || state == EXPR_VALUE || state == EXPR_CLASS)
             return kw->id[0];
           else {
             if (kw->id[0] != kw->id[1])
@@ -6550,6 +6597,7 @@ parser_init_cxt(parser_state *p, mrbc_context *cxt)
   }
   p->capture_errors = cxt->capture_errors;
   p->no_optimize = cxt->no_optimize;
+  p->no_ext_ops = cxt->no_ext_ops;
   p->upper = cxt->upper;
   if (cxt->partial_hook) {
     p->cxt = cxt;
@@ -6570,7 +6618,7 @@ parser_update_cxt(parser_state *p, mrbc_context *cxt)
     i++;
     n = n->cdr;
   }
-  cxt->syms = (mrb_sym *)mrb_realloc(p->mrb, cxt->syms, i*sizeof(mrb_sym));
+  cxt->syms = (mrb_sym*)mrb_realloc(p->mrb, cxt->syms, i*sizeof(mrb_sym));
   cxt->slen = i;
   for (i=0, n=n0; n; i++,n=n->cdr) {
     cxt->syms[i] = sym(n->car);
@@ -6628,7 +6676,7 @@ mrb_parser_new(mrb_state *mrb)
 
   pool = mrb_pool_open(mrb);
   if (!pool) return NULL;
-  p = (parser_state *)mrb_pool_alloc(pool, sizeof(parser_state));
+  p = (parser_state*)mrb_pool_alloc(pool, sizeof(parser_state));
   if (!p) return NULL;
 
   *p = parser_state_zero;
@@ -6653,8 +6701,6 @@ mrb_parser_new(mrb_state *mrb)
   p->tokbuf = p->buf;
 
   p->lex_strterm = NULL;
-  p->all_heredocs = p->parsing_heredoc = NULL;
-  p->lex_strterm_before_heredoc = NULL;
 
   p->current_filename_index = -1;
   p->filename_table = NULL;
@@ -6674,7 +6720,7 @@ mrb_parser_free(parser_state *p) {
 MRB_API mrbc_context*
 mrbc_context_new(mrb_state *mrb)
 {
-  return (mrbc_context *)mrb_calloc(mrb, 1, sizeof(mrbc_context));
+  return (mrbc_context*)mrb_calloc(mrb, 1, sizeof(mrbc_context));
 }
 
 MRB_API void
@@ -6690,7 +6736,7 @@ mrbc_filename(mrb_state *mrb, mrbc_context *c, const char *s)
 {
   if (s) {
     size_t len = strlen(s);
-    char *p = (char *)mrb_malloc(mrb, len + 1);
+    char *p = (char*)mrb_malloc(mrb, len + 1);
 
     memcpy(p, s, len + 1);
     if (c->filename) {
@@ -6767,8 +6813,8 @@ mrb_parse_file_continue(mrb_state *mrb, FILE *f, const void *prebuf, size_t preb
   p = mrb_parser_new(mrb);
   if (!p) return NULL;
   if (prebuf) {
-    p->s = (const char *)prebuf;
-    p->send = (const char *)prebuf + prebufsize;
+    p->s = (const char*)prebuf;
+    p->send = (const char*)prebuf + prebufsize;
   }
   else {
     p->s = p->send = NULL;
@@ -6909,19 +6955,20 @@ mrb_load_detect_file_cxt(mrb_state *mrb, FILE *fp, mrbc_context *c)
     return mrb_load_exec(mrb, mrb_parse_file_continue(mrb, fp, leading.b, bufsize, c), c);
   }
   else {
-    size_t binsize;
+    mrb_int binsize;
     uint8_t *bin;
     mrb_value bin_obj = mrb_nil_value(); /* temporary string object */
     mrb_value result;
 
     binsize = bin_to_uint32(leading.h.binary_size);
     bin_obj = mrb_str_new(mrb, NULL, binsize);
-    bin = (uint8_t *)RSTRING_PTR(bin_obj);
-    memcpy(bin, leading.b, bufsize);
-    if (binsize > bufsize &&
-        fread(bin + bufsize, binsize - bufsize, 1, fp) == 0) {
-      binsize = bufsize;
-      /* The error is reported by mrb_load_irep_buf_cxt() */
+    bin = (uint8_t*)RSTRING_PTR(bin_obj);
+    if ((size_t)binsize > bufsize)  {
+      memcpy(bin, leading.b, bufsize);
+      if (fread(bin + bufsize, binsize - bufsize, 1, fp) == 0) {
+        binsize = bufsize;
+        /* The error is reported by mrb_load_irep_buf_cxt() */
+      }
     }
 
     result = mrb_load_irep_buf_cxt(mrb, bin, binsize, c);
@@ -7001,8 +7048,13 @@ dump_args(mrb_state *mrb, node *n, int offset)
   }
   n = n->cdr;
   if (n->car) {
+    mrb_sym rest = sym(n->car);
+
     dump_prefix(n, offset+1);
-    printf("rest=*%s\n", mrb_sym_name(mrb, sym(n->car)));
+    if (rest == MRB_OPSYM(mul))
+      printf("rest=*\n");
+    else
+      printf("rest=*%s\n", mrb_sym_name(mrb, rest));
   }
   n = n->cdr;
   if (n->car) {
@@ -7279,9 +7331,16 @@ mrb_parser_dump(mrb_state *mrb, node *tree, int offset)
       printf("args:\n");
       dump_recur(mrb, tree->car, offset+2);
       if (tree->cdr) {
-        dump_prefix(tree, offset+1);
-        printf("block:\n");
-        mrb_parser_dump(mrb, tree->cdr, offset+2);
+        if (tree->cdr->car) {
+          dump_prefix(tree, offset+1);
+          printf("kwargs:\n");
+          mrb_parser_dump(mrb, tree->cdr->car, offset+2);
+        }
+        if (tree->cdr->cdr) {
+          dump_prefix(tree, offset+1);
+          printf("block:\n");
+          mrb_parser_dump(mrb, tree->cdr->cdr, offset+2);
+        }
       }
     }
     break;
@@ -7381,12 +7440,10 @@ mrb_parser_dump(mrb_state *mrb, node *tree, int offset)
           }
         }
         n2 = n2->cdr;
-        if (n2) {
-          if (n2->car) {
-            dump_prefix(n2, offset+2);
-            printf("post:\n");
-            dump_recur(mrb, n2->car, offset+3);
-          }
+        if (n2 && n2->car) {
+          dump_prefix(n2, offset+2);
+          printf("post:\n");
+          dump_recur(mrb, n2->car, offset+3);
         }
       }
     }
@@ -7422,7 +7479,17 @@ mrb_parser_dump(mrb_state *mrb, node *tree, int offset)
     break;
 
   case NODE_ZSUPER:
-    printf("NODE_ZSUPER\n");
+    printf("NODE_ZSUPER:\n");
+    if (tree) {
+      dump_prefix(tree, offset+1);
+      printf("args:\n");
+      dump_recur(mrb, tree->car, offset+2);
+      if (tree->cdr) {
+        dump_prefix(tree, offset+1);
+        printf("block:\n");
+        mrb_parser_dump(mrb, tree->cdr, offset+2);
+      }
+    }
     break;
 
   case NODE_RETURN:
@@ -7536,20 +7603,28 @@ mrb_parser_dump(mrb_state *mrb, node *tree, int offset)
     break;
 
   case NODE_REGX:
-    printf("NODE_REGX /%s/%s\n", (char*)tree->car, (char*)tree->cdr);
+    printf("NODE_REGX /%s/\n", (char*)tree->car);
+    if (tree->cdr->car) {
+      dump_prefix(tree, offset+1);
+      printf("opt: %s\n", (char*)tree->cdr->car);
+    }
+    if (tree->cdr->cdr) {
+      dump_prefix(tree, offset+1);
+      printf("enc: %s\n", (char*)tree->cdr->cdr);
+    }
     break;
 
   case NODE_DREGX:
     printf("NODE_DREGX:\n");
     dump_recur(mrb, tree->car, offset+1);
-    dump_prefix(tree, offset);
+    dump_prefix(tree, offset+1);
     printf("tail: %s\n", (char*)tree->cdr->cdr->car);
     if (tree->cdr->cdr->cdr->car) {
-      dump_prefix(tree, offset);
+      dump_prefix(tree, offset+1);
       printf("opt: %s\n", (char*)tree->cdr->cdr->cdr->car);
     }
     if (tree->cdr->cdr->cdr->cdr) {
-      dump_prefix(tree, offset);
+      dump_prefix(tree, offset+1);
       printf("enc: %s\n", (char*)tree->cdr->cdr->cdr->cdr);
     }
     break;
@@ -7748,7 +7823,10 @@ mrb_parser_dump(mrb_state *mrb, node *tree, int offset)
     break;
 
   case NODE_KW_REST_ARGS:
-    printf("NODE_KW_REST_ARGS %s\n", mrb_sym_name(mrb, sym(tree)));
+    if (tree)
+      printf("NODE_KW_REST_ARGS %s\n", mrb_sym_name(mrb, sym(tree)));
+    else
+      printf("NODE_KW_REST_ARGS\n");
     break;
 
   default:

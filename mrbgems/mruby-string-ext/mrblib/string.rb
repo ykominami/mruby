@@ -151,7 +151,7 @@ class String
   #
   def slice!(arg1, arg2=nil)
     raise FrozenError, "can't modify frozen String" if frozen?
-    raise "wrong number of arguments (for 1..2)" if arg1.nil? && arg2.nil?
+    raise ArgumentError, "wrong number of arguments (expected 1..2)" if arg1.nil? && arg2.nil?
 
     if !arg1.nil? && !arg2.nil?
       idx = arg1
@@ -334,8 +334,12 @@ class String
   #    a = "world"
   #    a.prepend("hello ") #=> "hello world"
   #    a                   #=> "hello world"
-  def prepend(arg)
-    self[0, 0] = arg
+  def prepend(*args)
+    len = args.size
+    while len > 0
+      len -= 1
+      self[0, 0] = args[len]
+    end
     self
   end
 

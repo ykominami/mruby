@@ -150,10 +150,12 @@ static const unsigned int IEEE754_INFINITY_BITS_SINGLE = 0x7F800000;
   f(MRB_TT_ENV,         struct REnv,        "env") \
   f(MRB_TT_DATA,        struct RData,       "Data") \
   f(MRB_TT_FIBER,       struct RFiber,      "Fiber") \
+  f(MRB_TT_STRUCT,      struct RArray,      "Struct") \
   f(MRB_TT_ISTRUCT,     struct RIStruct,    "istruct") \
   f(MRB_TT_BREAK,       struct RBreak,      "break") \
   f(MRB_TT_COMPLEX,     struct RComplex,    "Complex") \
-  f(MRB_TT_RATIONAL,    struct RRational,   "Rational")
+  f(MRB_TT_RATIONAL,    struct RRational,   "Rational") \
+  f(MRB_TT_BIGINT,      struct RBigint,     "Integer")
 
 enum mrb_vtype {
 #define MRB_VTYPE_DEFINE(tt, type, name) tt,
@@ -181,8 +183,8 @@ MRB_VTYPE_FOREACH(MRB_VTYPE_TYPEDEF)
  *
  * Actual implementation depends on configured boxing type.
  *
- * @see mruby/boxing_no.h Default boxing representation
- * @see mruby/boxing_word.h Word representation
+ * @see mruby/boxing_word.h Word boxing representation (Default)
+ * @see mruby/boxing_no.h No boxing representation
  * @see mruby/boxing_nan.h Boxed double representation
  */
 typedef void mrb_value;
@@ -299,6 +301,9 @@ struct RCptr {
 #define mrb_bool(o)   (mrb_type(o) != MRB_TT_FALSE)
 #endif
 #define mrb_test(o)   mrb_bool(o)
+#ifndef mrb_bigint_p
+#define mrb_bigint_p(o) (mrb_type(o) == MRB_TT_BIGINT)
+#endif
 
 /**
  * Returns a float in Ruby.
@@ -354,8 +359,6 @@ mrb_obj_value(void *p)
 {
   mrb_value v;
   SET_OBJ_VALUE(v, (struct RBasic*)p);
-  mrb_assert(p == mrb_ptr(v));
-  mrb_assert(((struct RBasic*)p)->tt == mrb_type(v));
   return v;
 }
 

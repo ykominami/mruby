@@ -1,4 +1,4 @@
-# User visible changes in `mruby3`
+# User visible changes in `mruby3.0`
 
 # Build System
 
@@ -42,7 +42,7 @@ We have ported some new syntax from CRuby.
 ## Renamed for consistency
 
 Some configuration macro names are changed for consistency (use `MRB_USE_XXX`
-or `MRB_NO_XXX`).
+ or `MRB_NO_XXX`).
 
 |             mruby2             |          mruby3           |
 |--------------------------------|---------------------------|
@@ -60,7 +60,7 @@ or `MRB_NO_XXX`).
 | `DISABLE_MIRB_UNDERSCORE`      | `MRB_NO_MIRB_UNDERSCORE`  |
 
 * `MRB_USE_FLOAT32` is changed from `MRB_USE_FLOAT` to make sure `float` here
-  means using single precision float, and not the opposite of `MRB_NO_FLOAT`.
+   means using single precision float, and not the opposite of `MRB_NO_FLOAT`.
 * `MRB_USE_METHOD_T_STRUCT` uses `struct` version of `mrb_method_t`. More
   portable but consumes more memory. Turned on by default on 32bit platforms.
 * `MRB_` prefix is added to those without.
@@ -76,13 +76,12 @@ to be default `mrb_value` representation. Now the default is
 
 Pack `mrb_value` in an `intptr_t` integer. Consumes less
 memory compared to `MRB_NO_BOXING` especially on 32-bit
-platforms. Inlined integer size is 31 bits, so some `mrb_int`
-values does not fit in `mrb_value`. Those integers are allocated
-in the object heap as `struct RInteger`.
+platforms. `Fixnum` size is 31 bits so some integer values
+does not fit in `Fixnum` integers.
 
 ## `MRB_NAN_BOXING`
 
-Pack `mrb_value` in a floating-point number. Nothing
+Pack `mrb_value` in a floating pointer number. Nothing
 changed from previous versions.
 
 ## `MRB_USE_MALLOC_TRIM`
@@ -111,9 +110,14 @@ $ bin/mruby -r lib1.rb -r lib2.rb < app.mrb
 
 `mruby3` introduces a few new instructions.
 
-Instructions that load a 16/32-bit integer.
+Instructions that access pool[i]/syms[i] where i>255.
 
-* `OP_LOADI16`
+* `OP_LOADL16`
+* `OP_STRING16`
+* `OP_LOADSYM16`
+
+Instructions that load a 32-bit integer.
+
 * `OP_LOADI32`
 
 Instruction that unwinds jump table for rescue/ensure.
@@ -147,7 +151,7 @@ No more operand extension
 
 Jump addresses used to be specified by absolute offset from the start of `iseq`. Now they are relative offset from the address of the next instruction.
 
-## `Random` now use `xoshiro128++`
+## `Random` now use `xoshiro128++`.
 
 For better and faster random number generation.
 
@@ -155,4 +159,4 @@ For better and faster random number generation.
 
 Preallocated symbols are interned at compile-time. They can be accessed via symbols macros (e.g. `MRB_SYM()`).
 
-See [Symbols](./guides/symbol.md).
+See [Symbols](https://github.com/mruby/mruby/blob/master/doc/guides/symbol.md).

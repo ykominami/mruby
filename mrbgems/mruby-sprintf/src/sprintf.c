@@ -153,12 +153,14 @@ fmt_float(char *buf, size_t buf_size, char fmt, int flags, mrb_int width, int pr
 }
 #endif
 
-#define CHECK(l) do {                           \
-  while ((l) >= bsiz - blen) {\
-    if (bsiz > MRB_INT_MAX/2) mrb_raise(mrb, E_ARGUMENT_ERROR, "too big specifier"); \
-    bsiz*=2;\
+#define CHECK(l) do { \
+  if (blen+(l) >= bsiz) {\
+    while (blen+(l) >= bsiz) {\
+      if (bsiz > MRB_INT_MAX/2) mrb_raise(mrb, E_ARGUMENT_ERROR, "too big specifier");\
+      bsiz*=2;\
+    }\
+    mrb_str_resize(mrb, result, bsiz);\
   }\
-  mrb_str_resize(mrb, result, bsiz);\
   buf = RSTRING_PTR(result);\
 } while (0)
 
@@ -692,6 +694,9 @@ retry:
         CHECK_FOR_WIDTH(flags);
         flags |= FWIDTH;
         GETASTER(width);
+        if (width > INT16_MAX || INT16_MIN > width) {
+          mrb_raise(mrb, E_ARGUMENT_ERROR, "width too big");
+        }
         if (width < 0) {
           flags |= FMINUS;
           width = -width;
@@ -999,12 +1004,14 @@ retry:
       }
       break;
 
-#ifndef MRB_NO_FLOAT
       case 'f':
       case 'g':
       case 'G':
       case 'e':
       case 'E': {
+#ifdef MRB_NO_FLOAT
+        mrb_raisef(mrb, E_ARGUMENT_ERROR, "%%%c not supported with MRB_NO_FLOAT defined", *p);
+#else
         mrb_value val = GETARG();
         double fval;
         mrb_int need = 6;
@@ -1056,7 +1063,7 @@ retry:
             need = BIT_DIGITS(i);
         }
         if (need > MRB_INT_MAX - ((flags&FPREC) ? prec : 6)) {
-        too_big_width:
+        too_big_width_prec:
           mrb_raise(mrb, E_ARGUMENT_ERROR,
                     (width > prec ? "width too big" : "prec too big"));
         }
@@ -1064,7 +1071,7 @@ retry:
         if ((flags&FWIDTH) && need < width)
           need = width;
         if (need > MRB_INT_MAX - 20) {
-          goto too_big_width;
+          goto too_big_width_prec;
         }
         need += 20;
 
@@ -1074,9 +1081,9 @@ retry:
           mrb_raise(mrb, E_RUNTIME_ERROR, "formatting error");
         }
         blen += n;
+#endif
       }
       break;
-#endif
     }
     flags = FNONE;
   }
