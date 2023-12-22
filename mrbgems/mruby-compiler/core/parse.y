@@ -12,7 +12,6 @@
 #define YYSTACK_USE_ALLOCA 1
 
 #include <ctype.h>
-#include <errno.h>
 #include <string.h>
 #include <mruby.h>
 #include <mruby/compile.h>
@@ -140,7 +139,7 @@ cons_gen(parser_state *p, node *car, node *cdr)
   c->filename_index = p->current_filename_index;
   /* beginning of next partial file; need to point the previous file */
   if (p->lineno == 0 && p->current_filename_index > 0) {
-    c->filename_index-- ;
+    c->filename_index--;
   }
   return c;
 }
@@ -1102,8 +1101,8 @@ concat_string(parser_state *p, node *a, node *b)
   }
   else {
     node *c; /* last node of a */
-    for (c = a; c->cdr != NULL; c = c->cdr) ;
-
+    for (c = a; c->cdr != NULL; c = c->cdr)
+      ;
     if (string_node_p(b)) {
       /* a == NODE_DSTR && b == NODE_STR */
       if (string_node_p(c->car)) {
@@ -1283,6 +1282,12 @@ call_with_block(parser_state *p, node *a, node *b)
     if (!n->car) n->car = new_callargs(p, 0, 0, b);
     else args_with_block(p, n->car, b);
     break;
+  case NODE_RETURN:
+  case NODE_BREAK:
+  case NODE_NEXT:
+    if (a->cdr == NULL) return;
+    call_with_block(p, a->cdr, b);
+    break;
   default:
     break;
   }
@@ -1455,56 +1460,56 @@ heredoc_end(parser_state *p)
 }
 
 %token <num>
-        keyword_class
-        keyword_module
-        keyword_def
-        keyword_begin
-        keyword_if
-        keyword_unless
-        keyword_while
-        keyword_until
-        keyword_for
+        keyword_class   "'class'"
+        keyword_module  "'module'"
+        keyword_def     "'def'"
+        keyword_begin   "'begin'"
+        keyword_if      "'if'"
+        keyword_unless  "'unless'"
+        keyword_while   "'while'"
+        keyword_until   "'until'"
+        keyword_for     "'for'"
 
 %token
-        keyword_undef
-        keyword_rescue
-        keyword_ensure
-        keyword_end
-        keyword_then
-        keyword_elsif
-        keyword_else
-        keyword_case
-        keyword_when
-        keyword_break
-        keyword_next
-        keyword_redo
-        keyword_retry
-        keyword_in
-        keyword_do
-        keyword_do_cond
-        keyword_do_block
-        keyword_do_LAMBDA
-        keyword_return
-        keyword_yield
-        keyword_super
-        keyword_self
-        keyword_nil
-        keyword_true
-        keyword_false
-        keyword_and
-        keyword_or
-        keyword_not
-        modifier_if
-        modifier_unless
-        modifier_while
-        modifier_until
-        modifier_rescue
-        keyword_alias
-        keyword_BEGIN
-        keyword_END
-        keyword__LINE__
-        keyword__FILE__
-        keyword__ENCODING__
+        keyword_undef   "'undef'"
+        keyword_rescue  "'rescue'"
+        keyword_ensure  "'ensure'"
+        keyword_end     "'end'"
+        keyword_then    "'then'"
+        keyword_elsif   "'elsif'"
+        keyword_else    "'else'"
+        keyword_case    "'case'"
+        keyword_when    "'when'"
+        keyword_break   "'break'"
+        keyword_next    "'next'"
+        keyword_redo    "'redo'"
+        keyword_retry   "'retry'"
+        keyword_in      "'in'"
+        keyword_do      "'do'"
+        keyword_do_cond         "'do' for condition"
+        keyword_do_block        "'do' for block"
+        keyword_do_LAMBDA       "'do' for lambda"
+        keyword_return  "'return'"
+        keyword_yield   "'yield'"
+        keyword_super   "'super'"
+        keyword_self    "'self'"
+        keyword_nil     "'nil'"
+        keyword_true    "'true'"
+        keyword_false   "'false'"
+        keyword_and     "'and'"
+        keyword_or      "'or'"
+        keyword_not     "'not'"
+        modifier_if     "'if' modifier"
+        modifier_unless "'unless' modifier"
+        modifier_while  "'while' modifier"
+        modifier_until  "'until' modifier"
+        modifier_rescue "'rescue' modifier"
+        keyword_alias   "'alis'"
+        keyword_BEGIN   "'BEGIN'"
+        keyword_END     "'END'"
+        keyword__LINE__ "'__LINE__'"
+        keyword__FILE__ "'__FILE__'"
+        keyword__ENCODING__     "'__ENCODING__'"
 
 %token <id>  tIDENTIFIER "local variable or method"
 %token <id>  tFID "method"
@@ -2646,6 +2651,10 @@ args            : arg
                       void_expr_error(p, $3);
                       $$ = push($1, $3);
                     }
+                | args comma tSTAR
+                    {
+                      $$ = push($1, new_splat(p, new_lvar(p, intern_op(mul))));
+                    }
                 | args comma tSTAR arg
                     {
                       $$ = push($1, new_splat(p, $4));
@@ -3166,12 +3175,14 @@ do_block        : keyword_do_block
                     {
                       local_nest(p);
                       nvars_nest(p);
+                      $<num>$ = p->lineno;
                     }
                   opt_block_param
                   bodystmt
                   keyword_end
                     {
                       $$ = new_block(p,$3,$4);
+                      SET_LINENO($$, $<num>2);
                       local_unnest(p);
                       nvars_unnest(p);
                     }
@@ -4244,7 +4255,7 @@ backref_error(parser_state *p, node *n)
     yyerror_c(p, "can't set variable $", (char)intn(n->cdr));
   }
   else {
-    mrb_bug(p->mrb, "Internal error in backref_error() : n=>car == %d", c);
+    yyerror(p, "Internal error in backref_error()");
   }
 }
 
@@ -4817,7 +4828,8 @@ heredoc_remove_indent(parser_state *p, parser_heredoc_info *hinfo)
         newstr[newlen] = '\0';
       pair->car = (node*)newstr;
       pair->cdr = (node*)newlen;
-    } else {
+    }
+    else {
       spaces = (size_t)nspaces->car;
       heredoc_count_indent(hinfo, str, len, spaces, &offset);
       pair->car = (node*)(str + offset);
@@ -4876,8 +4888,8 @@ parse_string(parser_state *p)
         int len = toklen(p);
         if (hinfo->allow_indent) {
           while (ISSPACE(*s) && len > 0) {
-            ++s;
-            --len;
+            s++;
+            len--;
           }
         }
         if (hinfo->term_len > 0 && len-1 == hinfo->term_len && strncmp(s, hinfo->term, len-1) == 0) {
@@ -4892,7 +4904,8 @@ parse_string(parser_state *p)
 
         if (sizeof(s1)+sizeof(s2)+strlen(hinfo->term)+1 >= sizeof(buf)) {
           yyerror(p, "can't find heredoc delimiter anywhere before EOF");
-        } else {
+        }
+        else {
           strcpy(buf, s1);
           strcat(buf, hinfo->term);
           strcat(buf, s2);
@@ -4912,7 +4925,7 @@ parse_string(parser_state *p)
       if (c == '\t')
         spaces += 8;
       else if (ISSPACE(c))
-        ++spaces;
+        spaces++;
       else
         empty = FALSE;
     }
@@ -5967,16 +5980,9 @@ parser_yylex(parser_state *p)
       return tINTEGER;
 #else
       double d;
-      char *endp;
 
-      errno = 0;
-      d = mrb_float_read(tok(p), &endp);
-      if (d == 0 && endp == tok(p)) {
+      if (!mrb_read_float(tok(p), NULL, &d)) {
         yywarning_s(p, "corrupted float value", tok(p));
-      }
-      else if (errno == ERANGE) {
-        yywarning_s(p, "float out of range", tok(p));
-        errno = 0;
       }
       suffix = number_literal_suffix(p);
       if (seen_e && (suffix & NUM_SUFFIX_R)) {
@@ -6322,8 +6328,8 @@ parser_yylex(parser_state *p)
       if (last_state == EXPR_FNAME) goto gvar;
       tokfix(p);
       {
-        mrb_int n = mrb_int_read(tok(p), NULL, NULL);
-        if (n > INT32_MAX) {
+        mrb_int n;
+        if (!mrb_read_int(tok(p), NULL, NULL, &n)) {
           yywarning(p, "capture group index too big; always nil");
           return keyword_nil;
         }
@@ -6582,7 +6588,7 @@ yylex(void *lval, parser_state *p)
 }
 
 static void
-parser_init_cxt(parser_state *p, mrbc_context *cxt)
+parser_init_cxt(parser_state *p, mrb_ccontext *cxt)
 {
   if (!cxt) return;
   if (cxt->filename) mrb_parser_set_filename(p, cxt->filename);
@@ -6605,7 +6611,7 @@ parser_init_cxt(parser_state *p, mrbc_context *cxt)
 }
 
 static void
-parser_update_cxt(parser_state *p, mrbc_context *cxt)
+parser_update_cxt(parser_state *p, mrb_ccontext *cxt)
 {
   node *n, *n0;
   int i = 0;
@@ -6625,11 +6631,10 @@ parser_update_cxt(parser_state *p, mrbc_context *cxt)
   }
 }
 
-void mrb_codedump_all(mrb_state*, struct RProc*);
 void mrb_parser_dump(mrb_state *mrb, node *tree, int offset);
 
 MRB_API void
-mrb_parser_parse(parser_state *p, mrbc_context *c)
+mrb_parser_parse(parser_state *p, mrb_ccontext *c)
 {
   struct mrb_jmpbuf buf1;
   struct mrb_jmpbuf *prev = p->mrb->jmp;
@@ -6717,14 +6722,14 @@ mrb_parser_free(parser_state *p) {
   mrb_pool_close(p->pool);
 }
 
-MRB_API mrbc_context*
-mrbc_context_new(mrb_state *mrb)
+MRB_API mrb_ccontext*
+mrb_ccontext_new(mrb_state *mrb)
 {
-  return (mrbc_context*)mrb_calloc(mrb, 1, sizeof(mrbc_context));
+  return (mrb_ccontext*)mrb_calloc(mrb, 1, sizeof(mrb_ccontext));
 }
 
 MRB_API void
-mrbc_context_free(mrb_state *mrb, mrbc_context *cxt)
+mrb_ccontext_free(mrb_state *mrb, mrb_ccontext *cxt)
 {
   mrb_free(mrb, cxt->filename);
   mrb_free(mrb, cxt->syms);
@@ -6732,12 +6737,13 @@ mrbc_context_free(mrb_state *mrb, mrbc_context *cxt)
 }
 
 MRB_API const char*
-mrbc_filename(mrb_state *mrb, mrbc_context *c, const char *s)
+mrb_ccontext_filename(mrb_state *mrb, mrb_ccontext *c, const char *s)
 {
   if (s) {
     size_t len = strlen(s);
-    char *p = (char*)mrb_malloc(mrb, len + 1);
+    char *p = (char*)mrb_malloc_simple(mrb, len + 1);
 
+    if (p == NULL) return NULL;
     memcpy(p, s, len + 1);
     if (c->filename) {
       mrb_free(mrb, c->filename);
@@ -6748,20 +6754,21 @@ mrbc_filename(mrb_state *mrb, mrbc_context *c, const char *s)
 }
 
 MRB_API void
-mrbc_partial_hook(mrb_state *mrb, mrbc_context *c, int (*func)(struct mrb_parser_state*), void *data)
+mrb_ccontext_partial_hook(mrb_state *mrb, mrb_ccontext *c, int (*func)(struct mrb_parser_state*), void *data)
 {
   c->partial_hook = func;
   c->partial_data = data;
 }
 
 MRB_API void
-mrbc_cleanup_local_variables(mrb_state *mrb, mrbc_context *c)
+mrb_ccontext_cleanup_local_variables(mrb_state *mrb, mrb_ccontext *c)
 {
   if (c->syms) {
     mrb_free(mrb, c->syms);
     c->syms = NULL;
     c->slen = 0;
   }
+  c->keep_lv = FALSE;
 }
 
 MRB_API void
@@ -6775,7 +6782,7 @@ mrb_parser_set_filename(struct mrb_parser_state *p, const char *f)
   p->filename_sym = sym;
   p->lineno = (p->filename_table_length > 0)? 0 : 1;
 
-  for (i = 0; i < p->filename_table_length; ++i) {
+  for (i = 0; i < p->filename_table_length; i++) {
     if (p->filename_table[i] == sym) {
       p->current_filename_index = i;
       return;
@@ -6806,7 +6813,7 @@ mrb_parser_get_filename(struct mrb_parser_state* p, uint16_t idx) {
 
 #ifndef MRB_NO_STDIO
 static struct mrb_parser_state *
-mrb_parse_file_continue(mrb_state *mrb, FILE *f, const void *prebuf, size_t prebufsize, mrbc_context *c)
+mrb_parse_file_continue(mrb_state *mrb, FILE *f, const void *prebuf, size_t prebufsize, mrb_ccontext *c)
 {
   parser_state *p;
 
@@ -6826,14 +6833,14 @@ mrb_parse_file_continue(mrb_state *mrb, FILE *f, const void *prebuf, size_t preb
 }
 
 MRB_API parser_state*
-mrb_parse_file(mrb_state *mrb, FILE *f, mrbc_context *c)
+mrb_parse_file(mrb_state *mrb, FILE *f, mrb_ccontext *c)
 {
   return mrb_parse_file_continue(mrb, f, NULL, 0, c);
 }
 #endif
 
 MRB_API parser_state*
-mrb_parse_nstring(mrb_state *mrb, const char *s, size_t len, mrbc_context *c)
+mrb_parse_nstring(mrb_state *mrb, const char *s, size_t len, mrb_ccontext *c)
 {
   parser_state *p;
 
@@ -6847,13 +6854,13 @@ mrb_parse_nstring(mrb_state *mrb, const char *s, size_t len, mrbc_context *c)
 }
 
 MRB_API parser_state*
-mrb_parse_string(mrb_state *mrb, const char *s, mrbc_context *c)
+mrb_parse_string(mrb_state *mrb, const char *s, mrb_ccontext *c)
 {
   return mrb_parse_nstring(mrb, s, strlen(s), c);
 }
 
 MRB_API mrb_value
-mrb_load_exec(mrb_state *mrb, struct mrb_parser_state *p, mrbc_context *c)
+mrb_load_exec(mrb_state *mrb, struct mrb_parser_state *p, mrb_ccontext *c)
 {
   struct RClass *target = mrb->object_class;
   struct RProc *proc;
@@ -6916,7 +6923,7 @@ mrb_load_exec(mrb_state *mrb, struct mrb_parser_state *p, mrbc_context *c)
 
 #ifndef MRB_NO_STDIO
 MRB_API mrb_value
-mrb_load_file_cxt(mrb_state *mrb, FILE *f, mrbc_context *c)
+mrb_load_file_cxt(mrb_state *mrb, FILE *f, mrb_ccontext *c)
 {
   return mrb_load_exec(mrb, mrb_parse_file(mrb, f, c), c);
 }
@@ -6936,7 +6943,7 @@ mrb_load_file(mrb_state *mrb, FILE *f)
  * - `NUL` is included in the first 64 bytes of the file
  */
 MRB_API mrb_value
-mrb_load_detect_file_cxt(mrb_state *mrb, FILE *fp, mrbc_context *c)
+mrb_load_detect_file_cxt(mrb_state *mrb, FILE *fp, mrb_ccontext *c)
 {
   union {
     char b[DETECT_SIZE];
@@ -6979,7 +6986,7 @@ mrb_load_detect_file_cxt(mrb_state *mrb, FILE *fp, mrbc_context *c)
 #endif
 
 MRB_API mrb_value
-mrb_load_nstring_cxt(mrb_state *mrb, const char *s, size_t len, mrbc_context *c)
+mrb_load_nstring_cxt(mrb_state *mrb, const char *s, size_t len, mrb_ccontext *c)
 {
   return mrb_load_exec(mrb, mrb_parse_nstring(mrb, s, len, c), c);
 }
@@ -6991,7 +6998,7 @@ mrb_load_nstring(mrb_state *mrb, const char *s, size_t len)
 }
 
 MRB_API mrb_value
-mrb_load_string_cxt(mrb_state *mrb, const char *s, mrbc_context *c)
+mrb_load_string_cxt(mrb_state *mrb, const char *s, mrb_ccontext *c)
 {
   return mrb_load_nstring_cxt(mrb, s, strlen(s), c);
 }

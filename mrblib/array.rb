@@ -1,4 +1,3 @@
-# coding: utf-8
 ##
 # Array
 #
@@ -102,29 +101,6 @@ class Array
     self
   end
 
-  def _inspect(recur_list)
-    size = self.size
-    return "[]" if size == 0
-    return "[...]" if recur_list[self.object_id]
-    recur_list[self.object_id] = true
-    ary=[]
-    i=0
-    while i<size
-      ary<<self[i]._inspect(recur_list)
-      i+=1
-    end
-    "["+ary.join(", ")+"]"
-  end
-  ##
-  # Return the contents of this array as a string.
-  #
-  # ISO 15.2.12.5.31 (x)
-  def inspect
-    self._inspect({})
-  end
-  # ISO 15.2.12.5.32 (x)
-  alias to_s inspect
-
   ##
   # call-seq:
   #   array == other   -> true or false
@@ -133,7 +109,6 @@ class Array
   #  of elements and if each element is equal to (according to
   #  Object.==) the corresponding element in the other array.
   #
-  # ISO 15.2.12.5.33 (x)
   def ==(other)
     other = self.__ary_eq(other)
     return false if other == false
@@ -154,7 +129,6 @@ class Array
   #  Returns <code>true</code> if +self+ and _other_ are the same object,
   #  or are both arrays with the same content.
   #
-  # ISO 15.2.12.5.34 (x)
   def eql?(other)
     other = self.__ary_eq(other)
     return false if other == false
@@ -177,12 +151,11 @@ class Array
   #  Each object in each array is compared (using <=>). If any value isn't
   #  equal, then that inequality is the return value. If all the
   #  values found are equal, then the return is based on a
-  #  comparison of the array lengths.  Thus, two arrays are
+  #  comparison of the array lengths. Thus, two arrays are
   #  "equal" according to <code>Array#<=></code> if and only if they have
   #  the same length and the value of each element is equal to the
   #  value of the corresponding element in the other array.
   #
-  # ISO 15.2.12.5.36 (x)
   def <=>(other)
     other = self.__ary_cmp(other)
     return 0 if 0 == other
@@ -264,7 +237,7 @@ class Array
         lsize = lary.size
 
         # The entity sharing between lary and self may cause a large memory
-        # copy operation in the merge loop below.  This harmless operation
+        # copy operation in the merge loop below. This harmless operation
         # cancels the sharing and provides a huge performance gain.
         lary[0] = lary[0]
 

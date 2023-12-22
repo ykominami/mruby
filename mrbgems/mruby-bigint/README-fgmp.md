@@ -10,7 +10,7 @@ with the same API.
 For instance, you can link the following trivial program with either
 this code, or libgmp.a and get the same results.
 
-``` C
+```c
 #include <stdio.h>
 #include "gmp.h"
 main()
@@ -56,7 +56,7 @@ Thanks also to Erick Gallesio <eg@kaolin.unice.fr> for a fix
 to mpz_init_set_str
 
 Define B64 if your "long" type is 64 bits. Otherwise we assume 32
-bit longs. (The 64 bit version hasn't been tested enough)
+bit longs. (The 64-bit version hasn't been tested enough)
 
 ```
 Platforms:

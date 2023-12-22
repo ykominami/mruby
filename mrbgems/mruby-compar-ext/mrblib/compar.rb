@@ -43,31 +43,47 @@ module Comparable
   def clamp(min, max=nil)
     if max.nil?
       if min.kind_of?(Range)
-        max = min.begin
+        max = min.end
         if max.nil?
           max = self
         elsif min.exclude_end?
           raise ArgumentError, "cannot clamp with an exclusive range"
         end
-        min = min.end
+        min = min.begin
         if min.nil?
           min = self
         end
+      elsif min.nil? or min < self
+        return self
       else
-        raise TypeError, "wrong argument type #{min.class}"
+        return min
       end
     end
-    if (min <=> max) > 0
+    if min.nil?
+      if self < max
+        return self
+      else
+        return max
+      end
+    end
+    c = min <=> max
+    if c.nil?
+      raise ArgumentError, "comparison of #{min.class} with #{max.class} failed"
+    elsif c > 0
       raise ArgumentError, "min argument must be smaller than max argument"
     end
     c = self <=> min
-    if c == 0
+    if c.nil?
+      raise ArgumentError, "comparison of #{self.class} with #{min.class} failed"
+    elsif c == 0
       return self
     elsif c < 0
       return min
     end
     c = self <=> max
-    if c > 0
+    if c.nil?
+      raise ArgumentError, "comparison of #{self.class} with #{max.class} failed"
+    elsif c > 0
       return max
     else
       return self

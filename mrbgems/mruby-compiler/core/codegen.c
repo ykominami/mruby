@@ -771,7 +771,7 @@ get_int_operand(codegen_scope *s, struct mrb_insn_data *data, mrb_int *n)
     return TRUE;
 
   case OP_LOADI32:
-    *n = (mrb_int)((uint32_t)data->b<<16)+data->c;
+    *n = (int32_t)((uint32_t)data->b<<16)+data->c;
     return TRUE;
 
   case OP_LOADL:
@@ -1256,7 +1256,7 @@ search_upvar(codegen_scope *s, mrb_sym id, int *idx)
     if (*idx > 0) {
       return lv;
     }
-    lv ++;
+    lv++;
     up = up->prev;
   }
 
@@ -1278,7 +1278,7 @@ search_upvar(codegen_scope *s, mrb_sym id, int *idx)
     }
     if (MRB_PROC_SCOPE_P(u)) break;
     u = u->upper;
-    lv ++;
+    lv++;
   }
 
   if (id == MRB_OPSYM_2(s->mrb, and)) {
@@ -2083,13 +2083,13 @@ gen_literal_array(codegen_scope *s, node *tree, mrb_bool sym, int val)
         /* fall through */
       case NODE_BEGIN:
         codegen(s, tree->car, VAL);
-        ++j;
+        j++;
         break;
 
       case NODE_LITERAL_DELIM:
         if (j > 0) {
           j = 0;
-          ++i;
+          i++;
           if (sym)
             gen_intern(s);
         }
@@ -2117,7 +2117,7 @@ gen_literal_array(codegen_scope *s, node *tree, mrb_bool sym, int val)
       tree = tree->cdr;
     }
     if (j > 0) {
-      ++i;
+      i++;
       if (sym)
         gen_intern(s);
     }
@@ -2202,7 +2202,7 @@ gen_retval(codegen_scope *s, node *tree)
   if (nint(tree->car) == NODE_SPLAT) {
     codegen(s, tree, VAL);
     pop();
-    genop_1(s, OP_ARYDUP, cursp());
+    genop_1(s, OP_ARYSPLAT, cursp());
   }
   else {
     codegen(s, tree, VAL);
@@ -2623,7 +2623,7 @@ codegen(codegen_scope *s, node *tree, int val)
           else {
             pop();
           }
-          tmp = genjmp2(s, OP_JMPIF, cursp(), pos2, NOVAL);
+          tmp = genjmp2(s, OP_JMPIF, cursp(), pos2, !head);
           pos2 = tmp;
           n = n->cdr;
         }
@@ -3318,8 +3318,9 @@ codegen(codegen_scope *s, node *tree, int val)
   case NODE_FLOAT:
     if (val) {
       char *p = (char*)tree;
-      mrb_float f = mrb_float_read(p, NULL);
-      int off = new_lit_float(s, f);
+      double f;
+      mrb_read_float(p, NULL, &f);
+      int off = new_lit_float(s, (mrb_float)f);
 
       genop_2(s, OP_LOADL, cursp(), off);
       push();
@@ -3335,8 +3336,9 @@ codegen(codegen_scope *s, node *tree, int val)
       case NODE_FLOAT:
         if (val) {
           char *p = (char*)tree->cdr;
-          mrb_float f = mrb_float_read(p, NULL);
-          int off = new_lit_float(s, -f);
+          double f;
+          mrb_read_float(p, NULL, &f);
+          int off = new_lit_float(s, (mrb_float)-f);
 
           genop_2(s, OP_LOADL, cursp(), off);
           push();
@@ -4020,7 +4022,7 @@ catch_handler_new(codegen_scope *s)
 {
   size_t newsize = sizeof(struct mrb_irep_catch_handler) * (s->irep->clen + 1);
   s->catch_table = (struct mrb_irep_catch_handler*)codegen_realloc(s, (void*)s->catch_table, newsize);
-  return s->irep->clen ++;
+  return s->irep->clen++;
 }
 
 static void
@@ -4091,7 +4093,7 @@ mrb_irep_remove_lv(mrb_state *mrb, mrb_irep *irep)
     irep->lv = NULL;
   }
   if (!irep->reps) return;
-  for (i = 0; i < irep->rlen; ++i) {
+  for (i = 0; i < irep->rlen; i++) {
     mrb_irep_remove_lv(mrb, (mrb_irep*)irep->reps[i]);
   }
 }
