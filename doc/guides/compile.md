@@ -80,7 +80,7 @@ conf.toolchain :clang
 #### Visual Studio 2010, 2012 and 2013
 
 Toolchain configuration for Visual Studio on Windows. If you use the
-[Visual Studio Command Prompt](https://msdn.microsoft.com/en-us/library/ms229859\(v=vs.110\).aspx),
+[Visual Studio Command Prompt](<https://msdn.microsoft.com/en-us/library/ms229859(v=vs.110).aspx>),
 you normally do not have to specify this manually, since it gets automatically detected by our build process.
 
 ```ruby
@@ -116,6 +116,36 @@ set the character via `conf.file_separator`.
 ```ruby
 conf.file_separator = '/'
 ```
+
+### Name of library directory
+
+In some environments, the `libmruby.a` file requires a different directory name than `lib`.
+You can be changed to any name by the `conf.libdir_name` accessor.
+
+```ruby
+conf.libdir_name = 'lib64'
+```
+
+Alternatively, it can be changed via the environment variable `MRUBY_SYSTEM_LIBDIR_NAME` when
+the `rake` command is run.
+
+```console
+$ export MRUBY_SYSTEM_LIBDIR_NAME=lib64
+$ rake clean all
+```
+
+NOTES:
+
+- This environment variable `MRUBY_SYSTEM_LIBDIR_NAME` does not affect `MRuby::CrossBuild`.
+  In other words, if you want to change it for `MRuby::CrossBuild`, you must set it with `MRuby::CrossBuild#libdir_name=`.
+- If you want to switch this environment variable `MRUBY_SYSTEM_LIBDIR_NAME`, you must do `rake clean`.
+
+  A bad usage example is shown below.
+
+  ```console
+  $ rake clean all
+  $ rake MRUBY_SYSTEM_LIBDIR_NAME=lib64 install
+  ```
 
 ### C Compiler
 
@@ -460,7 +490,7 @@ compile for `i386` a directory called `i386` is created under the
 build directory.
 
 The cross compilation workflow starts in the same way as the normal
-compilation by compiling all *native* libraries and binaries, except
+compilation by compiling all _native_ libraries and binaries, except
 for we don't have `host/mrbc` directory (`host` directory itself works
 as placeholder for `mrbc`). Afterwards the cross compilation process
 proceeds like this:

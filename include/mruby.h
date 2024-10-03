@@ -184,6 +184,7 @@ typedef struct {
   union {
     struct REnv *env;
     struct RClass *target_class;
+    const void *keep_context;   /* if NULL, it means that the fiber has switched; for internal use */
   } u;
 } mrb_callinfo;
 
@@ -229,22 +230,19 @@ mrb_static_assert_powerof2(MRB_METHOD_CACHE_SIZE);
  */
 typedef mrb_value (*mrb_func_t)(struct mrb_state *mrb, mrb_value self);
 
-#ifndef MRB_USE_METHOD_T_STRUCT
-typedef uintptr_t mrb_method_t;
-#else
 typedef struct {
-  uint8_t flags;
+  uint32_t flags;                       /* compatible with mt keys in class.c */
+
   union {
     struct RProc *proc;
     mrb_func_t func;
-  };
+  } as;
 } mrb_method_t;
-#endif
 
 #ifndef MRB_NO_METHOD_CACHE
 struct mrb_cache_entry {
   struct RClass *c, *c0;
-  mrb_sym mid;
+  /* mrb_sym mid; // mid is stored in mrb_method_t::flags */
   mrb_method_t m;
 };
 #endif
@@ -298,7 +296,7 @@ typedef struct mrb_state {
   mrb_sym symhash[256];
   size_t symcapa;
 #ifndef MRB_USE_ALL_SYMBOLS
-  char symbuf[8];               /* buffer for small symbol names */
+  char symbuf[8];                         /* buffer for small symbol names */
 #endif
 
 #ifdef MRB_USE_DEBUG_HOOK
@@ -798,6 +796,8 @@ MRB_API struct RClass * mrb_module_get_under_id(mrb_state *mrb, struct RClass *o
 MRB_API void mrb_notimplement(mrb_state*);
 /* a function to be replacement of unimplemented method */
 MRB_API mrb_value mrb_notimplement_m(mrb_state*, mrb_value);
+/* just return it self */
+MRB_API mrb_value mrb_obj_itself(mrb_state*, mrb_value);
 
 /**
  * Duplicate an object.
@@ -1081,7 +1081,7 @@ MRB_API mrb_bool mrb_block_given_p(mrb_state *mrb);
  *
  *      #include <stdio.h>
  *      #include <mruby.h>
- *      #include "mruby/compile.h"
+ *      #include <mruby/compile.h>
  *
  *      int
  *      main()
@@ -1112,7 +1112,7 @@ MRB_API mrb_value mrb_funcall_id(mrb_state *mrb, mrb_value val, mrb_sym mid, mrb
  *
  *      #include <stdio.h>
  *      #include <mruby.h>
- *      #include "mruby/compile.h"
+ *      #include <mruby/compile.h>
  *      int
  *      main()
  *      {
@@ -1277,7 +1277,29 @@ MRB_API void mrb_close(mrb_state *mrb);
 MRB_API void* mrb_default_allocf(mrb_state*, void*, size_t, void*);
 
 MRB_API mrb_value mrb_top_self(mrb_state *mrb);
+
+/**
+ * Enter the mruby VM and execute the proc.
+ *
+ * @param mrb
+ *      The current mruby state.
+ * @param proc
+ *      An object containing `irep`.
+ *      If supplied an object containing anything other than `irep`, it will probably crash.
+ * @param self
+ *      `self` on the execution context of `proc`.
+ * @param stack_keep
+ *      Specifies the number of values to hold from the stack top.
+ *      Values on the stack outside this range will be initialized to `nil`.
+ *
+ * @note
+ *      When called from a C function defined as a method, the current stack is destroyed.
+ *      If you want to use arguments obtained by `mrb_get_args()` or other methods after `mrb_top_run()`,
+ *      you must protect them by `mrb_gc_protect()` or other ways before this function.
+ *      Or consider using `mrb_yield()` family functions.
+ */
 MRB_API mrb_value mrb_top_run(mrb_state *mrb, const struct RProc *proc, mrb_value self, mrb_int stack_keep);
+
 MRB_API mrb_value mrb_vm_run(mrb_state *mrb, const struct RProc *proc, mrb_value self, mrb_int stack_keep);
 MRB_API mrb_value mrb_vm_exec(mrb_state *mrb, const struct RProc *proc, const mrb_code *iseq);
 /* compatibility macros */
@@ -1439,7 +1461,7 @@ MRB_API void mrb_define_global_const(mrb_state *mrb, const char *name, mrb_value
 MRB_API mrb_value mrb_attr_get(mrb_state *mrb, mrb_value obj, mrb_sym id);
 
 MRB_API mrb_bool mrb_respond_to(mrb_state *mrb, mrb_value obj, mrb_sym mid);
-MRB_API mrb_bool mrb_obj_is_instance_of(mrb_state *mrb, mrb_value obj, struct RClass* c);
+MRB_API mrb_bool mrb_obj_is_instance_of(mrb_state *mrb, mrb_value obj, const struct RClass* c);
 MRB_API mrb_bool mrb_func_basic_p(mrb_state *mrb, mrb_value obj, mrb_sym mid, mrb_func_t func);
 
 /* obsolete function(s); will be removed */
@@ -1539,6 +1561,8 @@ mrbmemset(void *s, int c, size_t n)
 }
 #define memset(a,b,c) mrbmemset(a,b,c)
 #endif
+
+#define mrb_int_hash_func(mrb,key) (uint32_t)((key)^((key)<<2)^((key)>>2))
 
 MRB_END_DECL
 

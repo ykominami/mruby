@@ -46,7 +46,7 @@ Mark Henderson <markh@wimsey.bc.ca>
 
 # This is the fifth BETA release. 1.0b5
 
-I hearby place this file and all of FGMP in the public domain.
+I hereby place this file and all of FGMP in the public domain.
 
 Thanks to Paul Rouse <par@r-cube.demon.co.uk> for changes to get fgmp
 to work on a 286 MS-DOS compiler, the functions mpz_sqrt and
@@ -73,18 +73,18 @@ MS-DOS 286 C compiler (see credits above)
 
 1. fgmp is considerably slower than gmp
 2. fgmp does not implement the following:
-    all mpq_*
-    internal mpn_* functions
-    mpz_perfect_square_p
-    mpz_inp_raw, mpz_out_raw
-    mp_set_memory_functions, mpz_out_str, mpz_inp_str
+   - all mpq\_\*
+   - internal mpn\_\* functions
+   - mpz_perfect_square_p
+   - mpz_inp_raw, mpz_out_raw
+   - mp_set_memory_functions, mpz_out_str, mpz_inp_str
 3. fgmp implements the following in addition to the routines in GNU gmp.
-    `int mpz_jacobi(MP_INT *a, MP_INT *b)`
-    - finds the jacobi symbol (a/b)
+   `int mpz_jacobi(MP_INT *a, MP_INT *b)`
+   - finds the jacobi symbol (a/b)
 4. mpz_sizeinbase often overestimates the exact value
 
 5. To convert your gmp based program to fgmp (subject to the
-above)
+   above)
 
 - recompile your source. Make sure to include the gmp.h file included
   with fgmp rather than that included with gmp. (The point is to recompile

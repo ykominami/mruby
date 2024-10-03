@@ -43,10 +43,8 @@ static void
 iv_rehash(mrb_state *mrb, iv_tbl *t)
 {
   int old_alloc = t->alloc;
-  int new_alloc = old_alloc+4;
+  int new_alloc = old_alloc > 0 ? old_alloc << 1 : 4;
   mrb_value *old_ptr = t->ptr;
-
-  khash_power2(new_alloc);
 
   t->ptr = (mrb_value*)mrb_calloc(mrb, sizeof(mrb_value)+sizeof(mrb_sym), new_alloc);
   t->size = 0;
@@ -75,7 +73,7 @@ iv_put(mrb_state *mrb, iv_tbl *t, mrb_sym sym, mrb_value val)
 
   mrb_sym *keys = (mrb_sym*)&t->ptr[t->alloc];
   mrb_value *vals = t->ptr;
-  hash = kh_int_hash_func(mrb, sym);
+  hash = mrb_int_hash_func(mrb, sym);
   start = pos = hash & (t->alloc-1);
   for (;;) {
     mrb_sym key = keys[pos];
@@ -121,7 +119,7 @@ iv_get(mrb_state *mrb, iv_tbl *t, mrb_sym sym, mrb_value *vp)
 
   mrb_sym *keys = (mrb_sym*)&t->ptr[t->alloc];
   mrb_value *vals = t->ptr;
-  hash = kh_int_hash_func(mrb, sym);
+  hash = mrb_int_hash_func(mrb, sym);
   start = pos = hash & (t->alloc-1);
   for (;;) {
     mrb_sym key = keys[pos];
@@ -151,7 +149,7 @@ iv_del(mrb_state *mrb, iv_tbl *t, mrb_sym sym, mrb_value *vp)
 
   mrb_sym *keys = (mrb_sym*)&t->ptr[t->alloc];
   mrb_value *vals = t->ptr;
-  hash = kh_int_hash_func(mrb, sym);
+  hash = mrb_int_hash_func(mrb, sym);
   start = pos = hash & (t->alloc-1);
   for (;;) {
     mrb_sym key = keys[pos];
@@ -255,15 +253,10 @@ mrb_gc_free_gv(mrb_state *mrb)
     iv_free(mrb, mrb->globals);
 }
 
-void
+size_t
 mrb_gc_mark_iv(mrb_state *mrb, struct RObject *obj)
 {
   mark_tbl(mrb, obj->iv);
-}
-
-size_t
-mrb_gc_mark_iv_size(mrb_state *mrb, struct RObject *obj)
-{
   return iv_size(mrb, obj->iv);
 }
 
@@ -289,7 +282,7 @@ mrb_vm_special_set(mrb_state *mrb, mrb_sym i, mrb_value v)
 static mrb_bool
 obj_iv_p(mrb_value obj)
 {
-  switch (mrb_type(obj)) {
+  switch (mrb_unboxed_type(obj)) {
     case MRB_TT_OBJECT:
     case MRB_TT_CLASS:
     case MRB_TT_MODULE:
@@ -301,6 +294,12 @@ obj_iv_p(mrb_value obj)
     default:
       return FALSE;
   }
+}
+
+static iv_tbl*
+class_iv_ptr(struct RClass *c)
+{
+  return c->tt == MRB_TT_ICLASS ? c->c->iv : c->iv;
 }
 
 MRB_API mrb_value
@@ -600,7 +599,7 @@ mrb_mod_class_variables(mrb_state *mrb, mrb_value mod)
   ary = mrb_ary_new(mrb);
   c = mrb_class_ptr(mod);
   while (c) {
-    iv_foreach(mrb, c->iv, cv_i, &ary);
+    iv_foreach(mrb, class_iv_ptr(c), cv_i, &ary);
     if (!inherit) break;
     c = c->super;
   }
@@ -615,7 +614,7 @@ mrb_mod_cv_get(mrb_state *mrb, struct RClass *c, mrb_sym sym)
   int given = FALSE;
 
   while (c) {
-    if (c->iv && iv_get(mrb, c->iv, sym, &v)) {
+    if (iv_get(mrb, class_iv_ptr(c), sym, &v)) {
       given = TRUE;
     }
     c = c->super;
@@ -629,7 +628,7 @@ mrb_mod_cv_get(mrb_state *mrb, struct RClass *c, mrb_sym sym)
     if (c->tt == MRB_TT_CLASS || c->tt == MRB_TT_MODULE) {
       given = FALSE;
       while (c) {
-        if (c->iv && iv_get(mrb, c->iv, sym, &v)) {
+        if (iv_get(mrb, class_iv_ptr(c), sym, &v)) {
           given = TRUE;
         }
         c = c->super;
@@ -654,7 +653,7 @@ mrb_mod_cv_set(mrb_state *mrb, struct RClass *c, mrb_sym sym, mrb_value v)
   struct RClass * cls = c;
 
   while (c) {
-    iv_tbl *t = c->iv;
+    iv_tbl *t = class_iv_ptr(c);
     int pos = iv_get(mrb, t, sym, NULL);
 
     if (pos) {
@@ -681,7 +680,10 @@ mrb_mod_cv_set(mrb_state *mrb, struct RClass *c, mrb_sym sym, mrb_value v)
       break;
     }
   }
-  else{
+  else if (cls && cls->tt == MRB_TT_ICLASS) {
+    c = cls->c;
+  }
+  else {
     c = cls;
   }
 
@@ -704,7 +706,7 @@ mrb_bool
 mrb_mod_cv_defined(mrb_state *mrb, struct RClass * c, mrb_sym sym)
 {
   while (c) {
-    iv_tbl *t = c->iv;
+    iv_tbl *t = class_iv_ptr(c);
     if (iv_get(mrb, t, sym, NULL)) return TRUE;
     c = c->super;
   }
@@ -772,7 +774,7 @@ const_get(mrb_state *mrb, struct RClass *base, mrb_sym sym, mrb_bool skip)
   if (skip) c = c->super;
 L_RETRY:
   while (c) {
-    if (!MRB_FLAG_TEST(c, MRB_FL_CLASS_IS_PREPENDED) && c->iv && iv_get(mrb, c->iv, sym, &v)) {
+    if (!MRB_FLAG_TEST(c, MRB_FL_CLASS_IS_PREPENDED) && iv_get(mrb, class_iv_ptr(c), sym, &v)) {
       return v;
     }
     c = c->super;
@@ -808,14 +810,14 @@ mrb_vm_const_get(mrb_state *mrb, mrb_sym sym)
 
   c = MRB_PROC_TARGET_CLASS(proc);
   if (!c) c = mrb->object_class;
-  if (iv_get(mrb, c->iv, sym, &v)) {
+  if (iv_get(mrb, class_iv_ptr(c), sym, &v)) {
     return v;
   }
   c2 = c;
   while (c2 && c2->tt == MRB_TT_SCLASS) {
     mrb_value klass;
 
-    if (!iv_get(mrb, c2->iv, MRB_SYM(__attached__), &klass)) {
+    if (!iv_get(mrb, class_iv_ptr(c2), MRB_SYM(__attached__), &klass)) {
       c2 = NULL;
       break;
     }
@@ -826,7 +828,7 @@ mrb_vm_const_get(mrb_state *mrb, mrb_sym sym)
   while (proc) {
     c2 = MRB_PROC_TARGET_CLASS(proc);
     if (!c2) c2 = mrb->object_class;
-    if (c2 && iv_get(mrb, c2->iv, sym, &v)) {
+    if (c2 && iv_get(mrb, class_iv_ptr(c2), sym, &v)) {
       return v;
     }
     proc = proc->upper;
@@ -919,7 +921,7 @@ mrb_mod_constants(mrb_state *mrb, mrb_value mod)
   mrb_get_args(mrb, "|b", &inherit);
   ary = mrb_ary_new(mrb);
   while (c) {
-    iv_foreach(mrb, c->iv, const_i, &ary);
+    iv_foreach(mrb, class_iv_ptr(c), const_i, &ary);
     if (!inherit) break;
     c = c->super;
     if (c == mrb->object_class) break;
@@ -995,7 +997,7 @@ const_defined_0(mrb_state *mrb, mrb_value mod, mrb_sym id, mrb_bool exclude, mrb
   tmp = klass;
 retry:
   while (tmp) {
-    if (iv_get(mrb, tmp->iv, id, NULL)) {
+    if (iv_get(mrb, class_iv_ptr(tmp), id, NULL)) {
       return TRUE;
     }
     if (!recurse && (klass != mrb->object_class)) break;
@@ -1054,7 +1056,7 @@ find_class_sym(mrb_state *mrb, struct RClass *outer, struct RClass *c)
   if (outer == c) return 0;
   arg.c = c;
   arg.sym = 0;
-  iv_foreach(mrb, outer->iv, csym_i, &arg);
+  iv_foreach(mrb, class_iv_ptr(outer), csym_i, &arg);
   return arg.sym;
 }
 

@@ -9,7 +9,7 @@ directory. For examples:
 
 - `default`: the default configuration
 - `host-gprof`: compiles with `gprof` for performance tuning
-- `host-m32`: compiles in gcc 32bit mode on 64bit platforms
+- `host-m32`: compiles in gcc 32-bit mode on 64-bit platforms
 - `boxing`: compiles all three boxing options
 - `clang-asan`: compiles with `clang`'s Address Sanitizer
 
@@ -42,10 +42,10 @@ We have ported some new syntax from CRuby.
 ## Renamed for consistency
 
 Some configuration macro names are changed for consistency (use `MRB_USE_XXX`
- or `MRB_NO_XXX`).
+or `MRB_NO_XXX`).
 
-|             mruby2             |          mruby3           |
-|--------------------------------|---------------------------|
+| mruby2                         | mruby3                    |
+| ------------------------------ | ------------------------- |
 | `MRB_ENABLE_ALL_SYMBOLS`       | `MRB_USE_ALL_SYMBOLS`     |
 | `MRB_ENABLE_CXX_ABI`           | `MRB_USE_CXX_ABI`         |
 | `MRB_ENABLE_CXX_EXCEPTION`     | `MRB_USE_CXX_EXCEPTION`   |
@@ -62,7 +62,7 @@ Some configuration macro names are changed for consistency (use `MRB_USE_XXX`
 - `MRB_USE_FLOAT32` is changed from `MRB_USE_FLOAT` to make sure `float` here
   means using single-precision float, and not the opposite of `MRB_NO_FLOAT`.
 - `MRB_USE_METHOD_T_STRUCT` uses `struct` version of `mrb_method_t`. More
-  portable but consumes more memory. Turned on by default on 32bit platforms.
+  portable but consumes more memory. Turned on by default on 32-bit platforms.
 - `MRB_` prefix is added to those without.
 
 ## `MRB_NO_BOXING`
@@ -149,7 +149,8 @@ No more operand extension
 
 ## Changed Instructions
 
-Jump addresses used to be specified by absolute offset from the start of `iseq`. Now they are relative offset from the address of the next instruction.
+Jump addresses used to be specified by absolute offset from the start of `iseq`. Now they are relative offset from the
+address of the next instruction.
 
 ## `Random` now use `xoshiro128++`.
 

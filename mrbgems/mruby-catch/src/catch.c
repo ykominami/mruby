@@ -37,6 +37,7 @@ static const mrb_irep catch_irep = {
   NULL,
   sizeof(catch_iseq),0,3,0,0
 };
+mrb_alignas(8)
 static const struct RProc catch_proc = {
   NULL, NULL, MRB_TT_PROC, MRB_GC_RED, MRB_FL_OBJ_IS_FROZEN | MRB_PROC_SCOPE | MRB_PROC_STRICT,
   { &catch_irep }, NULL, { NULL }
@@ -45,7 +46,7 @@ static const struct RProc catch_proc = {
 static uintptr_t
 find_catcher(mrb_state *mrb, mrb_value tag)
 {
-  const mrb_callinfo *ci = mrb->c->ci - 1; // skip ownself throw
+  const mrb_callinfo *ci = mrb->c->ci - 1; // skip oneself throw
   ptrdiff_t n = ci - mrb->c->cibase;
 
   for (; n > 0; n--, ci--) {
@@ -90,7 +91,7 @@ mrb_mruby_catch_gem_init(mrb_state *mrb)
   MRB_METHOD_FROM_PROC(m, &catch_proc);
   mrb_define_method_raw(mrb, mrb->kernel_module, MRB_SYM(catch), m);
 
-  mrb_define_method(mrb, mrb->kernel_module, "throw", throw_m, MRB_ARGS_ARG(1,1));
+  mrb_define_method_id(mrb, mrb->kernel_module, MRB_SYM(throw), throw_m, MRB_ARGS_ARG(1,1));
 }
 
 void

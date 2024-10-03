@@ -143,23 +143,24 @@ static const unsigned int IEEE754_INFINITY_BITS_SINGLE = 0x7F800000;
   f(MRB_TT_OBJECT,      struct RObject,     "Object") \
   f(MRB_TT_CLASS,       struct RClass,      "Class") \
   f(MRB_TT_MODULE,      struct RClass,      "Module") \
-  f(MRB_TT_ICLASS,      struct RClass,      "iClass") \
   f(MRB_TT_SCLASS,      struct RClass,      "SClass") \
+  f(MRB_TT_HASH,        struct RHash,       "Hash") \
+  f(MRB_TT_CDATA,       struct RData,       "C data") \
+  f(MRB_TT_EXCEPTION,   struct RException,  "Exception") \
+  f(MRB_TT_ICLASS,      struct RClass,      "iClass") \
   f(MRB_TT_PROC,        struct RProc,       "Proc") \
   f(MRB_TT_ARRAY,       struct RArray,      "Array") \
-  f(MRB_TT_HASH,        struct RHash,       "Hash") \
   f(MRB_TT_STRING,      struct RString,     "String") \
   f(MRB_TT_RANGE,       struct RRange,      "Range") \
-  f(MRB_TT_EXCEPTION,   struct RException,  "Exception") \
   f(MRB_TT_ENV,         struct REnv,        "env") \
-  f(MRB_TT_CDATA,       struct RData,       "C data") \
   f(MRB_TT_FIBER,       struct RFiber,      "Fiber") \
   f(MRB_TT_STRUCT,      struct RArray,      "Struct") \
   f(MRB_TT_ISTRUCT,     struct RIStruct,    "istruct") \
   f(MRB_TT_BREAK,       struct RBreak,      "break") \
   f(MRB_TT_COMPLEX,     struct RComplex,    "Complex") \
   f(MRB_TT_RATIONAL,    struct RRational,   "Rational") \
-  f(MRB_TT_BIGINT,      struct RBigint,     "Integer")
+  f(MRB_TT_BIGINT,      struct RBigint,     "Integer") \
+  f(MRB_TT_BACKTRACE,   struct RBacktrace,  "backtrace")
 
 enum mrb_vtype {
 #define MRB_VTYPE_DEFINE(tt, type, name) tt,
@@ -445,10 +446,9 @@ mrb_ro_data_p(const char *p)
   struct mach_header *mhp;
 #endif
   mhp = _NSGetMachExecuteHeader();
-  unsigned long textsize, datasize;
+  unsigned long textsize;
   char *text = (char*)getsegmentdata(mhp, SEG_TEXT, &textsize);
-  char *data = (char*)getsegmentdata(mhp, SEG_DATA, &datasize);
-  return text + textsize < p && p < data + datasize;
+  return text <= p && p < text + textsize;
 }
 #endif  /* Linux or macOS */
 #endif  /* MRB_NO_DEFAULT_RO_DATA_P */

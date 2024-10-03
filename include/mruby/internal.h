@@ -61,15 +61,25 @@ mrb_value mrb_exc_mesg_get(mrb_state *mrb, struct RException *exc);
 mrb_value mrb_f_raise(mrb_state*, mrb_value);
 mrb_value mrb_make_exception(mrb_state *mrb, mrb_value exc, mrb_value mesg);
 
+struct RBacktrace {
+  MRB_OBJECT_HEADER;
+  size_t len;
+  struct mrb_backtrace_location *locations;
+};
+
+struct mrb_backtrace_location {
+  mrb_sym method_id;
+  int32_t idx;
+  const mrb_irep *irep;
+};
+
 /* gc */
-void mrb_gc_mark_mt(mrb_state*, struct RClass*);
-size_t mrb_gc_mark_mt_size(mrb_state*, struct RClass*);
+size_t mrb_gc_mark_mt(mrb_state*, struct RClass*);
 void mrb_gc_free_mt(mrb_state*, struct RClass*);
 
 /* hash */
 size_t mrb_hash_memsize(mrb_value obj);
-void mrb_gc_mark_hash(mrb_state*, struct RHash*);
-size_t mrb_gc_mark_hash_size(mrb_state*, struct RHash*);
+size_t mrb_gc_mark_hash(mrb_state*, struct RHash*);
 void mrb_gc_free_hash(mrb_state*, struct RHash*);
 
 /* irep */
@@ -116,7 +126,9 @@ mrb_value mrb_rational_add(mrb_state *mrb, mrb_value x, mrb_value y);
 mrb_value mrb_rational_sub(mrb_state *mrb, mrb_value x, mrb_value y);
 mrb_value mrb_rational_mul(mrb_state *mrb, mrb_value x, mrb_value y);
 mrb_value mrb_rational_div(mrb_state *mrb, mrb_value x, mrb_value y);
+mrb_value mrb_as_rational(mrb_state *mrb, mrb_value x);
 void mrb_rational_copy(mrb_state *mrb, mrb_value x, mrb_value y);
+int mrb_rational_mark(mrb_state *mrb, struct RBasic *rat);
 #endif
 
 #ifdef MRUBY_PROC_H
@@ -134,7 +146,7 @@ mrb_bool mrb_proc_eql(mrb_state *mrb, mrb_value self, mrb_value other);
 /* range */
 #ifdef MRUBY_RANGE_H
 mrb_value mrb_get_values_at(mrb_state *mrb, mrb_value obj, mrb_int olen, mrb_int argc, const mrb_value *argv, mrb_value (*func)(mrb_state*, mrb_value, mrb_int));
-void mrb_gc_mark_range(mrb_state *mrb, struct RRange *r);
+size_t mrb_gc_mark_range(mrb_state *mrb, struct RRange *r);
 #endif
 
 /* string */
@@ -174,8 +186,7 @@ mrb_bool mrb_ident_p(const char *s, mrb_int len);
 /* GC functions */
 void mrb_gc_mark_gv(mrb_state*);
 void mrb_gc_free_gv(mrb_state*);
-void mrb_gc_mark_iv(mrb_state*, struct RObject*);
-size_t mrb_gc_mark_iv_size(mrb_state*, struct RObject*);
+size_t mrb_gc_mark_iv(mrb_state*, struct RObject*);
 void mrb_gc_free_iv(mrb_state*, struct RObject*);
 
 /* VM */
@@ -198,8 +209,8 @@ mrb_value mrb_bint_new_str(mrb_state *mrb, const char *x, mrb_int len, mrb_int b
 mrb_value mrb_as_bint(mrb_state *mrb, mrb_value x);
 mrb_value mrb_bint_add(mrb_state *mrb, mrb_value x, mrb_value y);
 mrb_value mrb_bint_sub(mrb_state *mrb, mrb_value x, mrb_value y);
-mrb_value mrb_bint_add_d(mrb_state *mrb, mrb_value x, mrb_value y);
-mrb_value mrb_bint_sub_d(mrb_state *mrb, mrb_value x, mrb_value y);
+mrb_value mrb_bint_add_n(mrb_state *mrb, mrb_value x, mrb_value y);
+mrb_value mrb_bint_sub_n(mrb_state *mrb, mrb_value x, mrb_value y);
 mrb_value mrb_bint_mul(mrb_state *mrb, mrb_value x, mrb_value y);
 mrb_value mrb_bint_div(mrb_state *mrb, mrb_value x, mrb_value y);
 mrb_value mrb_bint_divmod(mrb_state *mrb, mrb_value x, mrb_value y);
@@ -212,6 +223,7 @@ mrb_value mrb_bint_pow(mrb_state *mrb, mrb_value x, mrb_value y);
 mrb_value mrb_bint_powm(mrb_state *mrb, mrb_value x, mrb_value y, mrb_value z);
 mrb_value mrb_bint_and(mrb_state *mrb, mrb_value x, mrb_value y);
 mrb_value mrb_bint_or(mrb_state *mrb, mrb_value x, mrb_value y);
+mrb_value mrb_bint_neg(mrb_state *mrb, mrb_value x);
 mrb_value mrb_bint_xor(mrb_state *mrb, mrb_value x, mrb_value y);
 mrb_value mrb_bint_rev(mrb_state *mrb, mrb_value x);
 mrb_value mrb_bint_lshift(mrb_state *mrb, mrb_value x, mrb_int width);
