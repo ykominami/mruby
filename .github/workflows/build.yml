@@ -28,8 +28,82 @@ jobs:
       CXX: ${{ matrix.cxx }}
       LD: ${{ matrix.cc }}
     steps:
-      - name: "Checkout ${{ github.ref }} ( ${{ github.sha }} )"
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - name: Ruby version
+        run: ruby -v
+      - name: Compiler version
+        run: ${{ env.CC }} --version
+      - name: Build and test
+        run: rake -m test:build && rake test:run
+
+  Ubuntu-1804-clang:
+    runs-on: ubuntu-18.04
+    timeout-minutes: 10
+    env:
+      MRUBY_CONFIG: ci/gcc-clang
+      CC: clang
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ruby version
+        run: ruby -v
+      - name: Compiler version
+        run: ${{ env.CC }} --version
+      - name: Build and test
+        run: rake -m test:build && rake test:run
+
+  Ubuntu-2004-gcc:
+    runs-on: ubuntu-20.04
+    timeout-minutes: 10
+    env:
+      MRUBY_CONFIG: ci/gcc-clang
+      CC: gcc
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ruby version
+        run: ruby -v
+      - name: Compiler version
+        run: ${{ env.CC }} --version
+      - name: Build and test
+        run: rake -m test:build && rake test:run
+
+  Ubuntu-2004-clang:
+    runs-on: ubuntu-20.04
+    timeout-minutes: 10
+    env:
+      MRUBY_CONFIG: ci/gcc-clang
+      CC: clang
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ruby version
+        run: ruby -v
+      - name: Compiler version
+        run: ${{ env.CC }} --version
+      - name: Build and test
+        run: rake -m test:build && rake test:run
+
+  macOS:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    env:
+      MRUBY_CONFIG: ci/gcc-clang
+      CC: clang
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ruby version
+        run: ruby -v
+      - name: Compiler version
+        run: ${{ env.CC }} --version
+      - name: Build and test
+        run: rake -m test:build && rake test:run
+
+  Windows-MinGW:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    env:
+      MRUBY_CONFIG: ci/gcc-clang
+      CC: gcc
+    steps:
+      - uses: actions/checkout@v4
       - name: Ruby version
         run: ruby -v
       - name: Compiler version
@@ -43,8 +117,7 @@ jobs:
     env:
       MRUBY_CONFIG: ci/msvc
     steps:
-      - name: "Checkout ${{ github.ref }} ( ${{ github.sha }} )"
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
       - name: Ruby version
         run: ruby -v
       - name: Build and test
