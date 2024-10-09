@@ -14,9 +14,8 @@
 MRB_API struct RData*
 mrb_data_object_alloc(mrb_state *mrb, struct RClass *klass, void *ptr, const mrb_data_type *type)
 {
-  struct RData *data;
+  struct RData *data = MRB_OBJ_ALLOC(mrb, MRB_TT_CDATA, klass);
 
-  data = MRB_OBJ_ALLOC(mrb, MRB_TT_DATA, klass);
   data->data = ptr;
   data->type = type;
 
@@ -27,7 +26,7 @@ MRB_API void
 mrb_data_check_type(mrb_state *mrb, mrb_value obj, const mrb_data_type *type)
 {
   if (!mrb_data_p(obj)) {
-    mrb_check_type(mrb, obj, MRB_TT_DATA);
+    mrb_check_type(mrb, obj, MRB_TT_CDATA);
   }
   if (DATA_TYPE(obj) != type) {
     const mrb_data_type *t2 = DATA_TYPE(obj);
@@ -71,7 +70,7 @@ mrb_obj_to_sym(mrb_state *mrb, mrb_value name)
   return 0;  /* not reached */
 }
 
-#ifndef MRB_NO_FLOAT
+#if !defined(MRB_NO_FLOAT) && !defined(MRB_NAN_BOXING)
 static mrb_int
 mrb_float_id(mrb_float f)
 {
@@ -137,7 +136,7 @@ mrb_obj_id(mrb_value obj)
   case MRB_TT_HASH:
   case MRB_TT_RANGE:
   case MRB_TT_EXCEPTION:
-  case MRB_TT_DATA:
+  case MRB_TT_CDATA:
   case MRB_TT_ISTRUCT:
   default:
     return MakeID(mrb_ptr(obj), tt);
@@ -203,9 +202,7 @@ mrb_boxing_int_value(mrb_state *mrb, mrb_int n)
   if (FIXABLE(n)) return mrb_fixnum_value(n);
   else {
     mrb_value v;
-    struct RInteger *p;
-
-    p = (struct RInteger*)mrb_obj_alloc(mrb, MRB_TT_INTEGER, mrb->integer_class);
+    struct RInteger *p = (struct RInteger*)mrb_obj_alloc(mrb, MRB_TT_INTEGER, mrb->integer_class);
     p->i = n;
     MRB_SET_FROZEN_FLAG((struct RBasic*)p);
     SET_OBJ_VALUE(v, p);
@@ -242,9 +239,9 @@ MRB_API int
 mrb_msvc_snprintf(char *s, size_t n, const char *format, ...)
 {
   va_list arg;
-  int ret;
   va_start(arg, format);
-  ret = mrb_msvc_vsnprintf(s, n, format, arg);
+
+  int ret = mrb_msvc_vsnprintf(s, n, format, arg);
   va_end(arg);
   return ret;
 }

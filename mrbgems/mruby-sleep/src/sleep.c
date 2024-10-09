@@ -36,11 +36,12 @@
     #include <sys/time.h>
 #endif
 
-#include "mruby.h"
+#include <mruby.h>
+#include <mruby/presym.h>
 
 /* not implemented forever sleep (called without an argument)*/
 static mrb_value
-mrb_f_sleep(mrb_state *mrb, mrb_value self)
+f_sleep(mrb_state *mrb, mrb_value self)
 {
     time_t beg = time(0);
     time_t end;
@@ -60,7 +61,8 @@ mrb_f_sleep(mrb_state *mrb, mrb_value self)
     mrb_get_args(mrb, "i", &sec);
     if (sec >= 0) {
         sleep(sec);
-    } else {
+    }
+    else {
         mrb_raise(mrb, E_ARGUMENT_ERROR, "time interval must not be negative");
     }
 #endif
@@ -71,7 +73,7 @@ mrb_f_sleep(mrb_state *mrb, mrb_value self)
 
 /* mruby special; needed for mruby without float numbers */
 static mrb_value
-mrb_f_usleep(mrb_state *mrb, mrb_value self)
+f_usleep(mrb_state *mrb, mrb_value self)
 {
     mrb_int usec;
 #ifdef _WIN32
@@ -94,7 +96,8 @@ mrb_f_usleep(mrb_state *mrb, mrb_value self)
 
     if (usec >= 0) {
         usleep(usec);
-    } else {
+    }
+    else {
         mrb_raise(mrb, E_ARGUMENT_ERROR, "time interval must not be negative");
     }
 
@@ -126,8 +129,8 @@ mrb_f_usleep(mrb_state *mrb, mrb_value self)
 void
 mrb_mruby_sleep_gem_init(mrb_state *mrb)
 {
-    mrb_define_method(mrb, mrb->kernel_module, "sleep",   mrb_f_sleep,   MRB_ARGS_REQ(1));
-    mrb_define_method(mrb, mrb->kernel_module, "usleep",  mrb_f_usleep,  MRB_ARGS_REQ(1));
+  mrb_define_method_id(mrb, mrb->kernel_module, MRB_SYM(sleep),   f_sleep,   MRB_ARGS_REQ(1));
+  mrb_define_method_id(mrb, mrb->kernel_module, MRB_SYM(usleep),  f_usleep,  MRB_ARGS_REQ(1));
 }
 
 void

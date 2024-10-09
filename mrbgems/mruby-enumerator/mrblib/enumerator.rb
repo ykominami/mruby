@@ -36,7 +36,7 @@
 #       # foo: two
 #       # foo: three
 #
-# This allows you to chain Enumerators together.  For example, you
+# This allows you to chain Enumerators together. For example, you
 # can map a list's elements to strings containing the index
 # and the element as a string via:
 #
@@ -112,12 +112,12 @@ class Enumerator
   # given object using the given method with the given arguments passed. This
   # form is left only for internal use.
   #
-  # Use of this form is discouraged.  Use Kernel#enum_for or Kernel#to_enum
+  # Use of this form is discouraged. Use Kernel#enum_for or Kernel#to_enum
   # instead.
   def initialize(obj=NONE, meth=:each, *args, **kwd, &block)
     if block
       obj = Generator.new(&block)
-    elsif obj == NONE
+    elsif NONE.equal?(obj)
       raise ArgumentError, "wrong number of arguments (given 0, expected 1+)"
     end
 
@@ -132,16 +132,20 @@ class Enumerator
     @stop_exc = false
   end
 
-  attr_accessor :obj, :meth, :args, :kwd
-  attr_reader :fib
-
   def initialize_copy(obj)
     raise TypeError, "can't copy type #{obj.class}" unless obj.kind_of? Enumerator
-    raise TypeError, "can't copy execution context" if obj.fib
-    @obj = obj.obj
-    @meth = obj.meth
-    @args = obj.args
-    @kwd = obj.kwd
+    raise TypeError, "can't copy execution context" if obj.instance_eval{@fib}
+    meth = args = kwd = fib = nil
+    obj.instance_eval {
+      obj = @obj
+      meth = @meth
+      args = @args
+      kwd = @kwd
+    }
+    @obj = obj
+    @meth = meth
+    @args = args
+    @kwd = kwd
     @fib = nil
     @lookahead = nil
     @feedvalue = nil
@@ -154,7 +158,7 @@ class Enumerator
   #   e.with_index(offset = 0)
   #
   # Iterates the given block for each element with an index, which
-  # starts from +offset+.  If no block is given, returns a new Enumerator
+  # starts from +offset+. If no block is given, returns a new Enumerator
   # that includes the index, starting from +offset+
   #
   # +offset+:: the starting index to use
@@ -169,7 +173,7 @@ class Enumerator
     end
 
     n = offset - 1
-    enumerator_block_call do |*i|
+    __enumerator_block_call do |*i|
       n += 1
       block.call i.__svalue, n
     end
@@ -219,7 +223,7 @@ class Enumerator
   def with_object(object, &block)
     return to_enum(:with_object, object) unless block
 
-    enumerator_block_call do |i|
+    __enumerator_block_call do |i|
       block.call [i,object]
     end
     object
@@ -231,6 +235,14 @@ class Enumerator
       "#<#{self.class}: #{@obj.inspect}:#{@meth}(#{args})>"
     else
       "#<#{self.class}: #{@obj.inspect}:#{@meth}>"
+    end
+  end
+
+  def size
+    if @size
+      @size
+    elsif @obj.respond_to?(:size)
+      @obj.size
     end
   end
 
@@ -274,30 +286,30 @@ class Enumerator
     obj = self
     if 0 < argv.length
       obj = self.dup
-      args = obj.args
+      args = obj.instance_eval{@args}
       if !args.empty?
         args = args.dup
         args.concat argv
       else
         args = argv.dup
       end
-      obj.args = args
+      obj.instance_eval{@args = args}
     end
     return obj unless block
-    enumerator_block_call(&block)
+    __enumerator_block_call(&block)
   end
 
-  def enumerator_block_call(&block)
+  def __enumerator_block_call(&block)
     @obj.__send__ @meth, *@args, **@kwd, &block
   end
-  private :enumerator_block_call
+  private :__enumerator_block_call
 
   ##
   # call-seq:
   #   e.next   -> object
   #
   # Returns the next object in the enumerator, and move the internal position
-  # forward.  When the position reached at the end, StopIteration is raised.
+  # forward. When the position reached at the end, StopIteration is raised.
   #
   # === Example
   #
@@ -321,7 +333,7 @@ class Enumerator
   #   e.next_values   -> array
   #
   # Returns the next object as an array in the enumerator, and move the
-  # internal position forward.  When the position reached at the end,
+  # internal position forward. When the position reached at the end,
   # StopIteration is raised.
   #
   # This method can be used to distinguish <code>yield</code> and <code>yield
@@ -405,7 +417,7 @@ class Enumerator
   #   e.peek   -> object
   #
   # Returns the next object in the enumerator, but doesn't move the internal
-  # position forward.  If the position is already at the end, StopIteration
+  # position forward. If the position is already at the end, StopIteration
   # is raised.
   #
   # === Example
@@ -429,7 +441,7 @@ class Enumerator
   #   e.peek_values   -> array
   #
   # Returns the next object as an array, similar to Enumerator#next_values, but
-  # doesn't move the internal position forward.  If the position is already at
+  # doesn't move the internal position forward. If the position is already at
   # the end, StopIteration is raised.
   #
   # === Example
@@ -564,7 +576,7 @@ class Enumerator
   #    Enumerator.produce(initial = nil) { |val| } -> enumerator
   #
   # Creates an infinite enumerator from any block, just called over and
-  # over.  Result of the previous iteration is passed to the next one.
+  # over. Result of the previous iteration is passed to the next one.
   # If +initial+ is provided, it is passed to the first iteration, and
   # becomes the first element of the enumerator; if it is not provided,
   # first iteration receives +nil+, and its result becomes first
@@ -574,7 +586,7 @@ class Enumerator
   #
   # Examples of usage:
   #
-  #   Enumerator.produce(1, &:succ)   # => enumerator of 1, 2, 3, 4, ....
+  #   Enumerator.produce(1, &:succ)   # => enumerator of 1, 2, 3, 4, ...
   #
   #   Enumerator.produce { rand(10) } # => infinite random number sequence
   #
@@ -583,7 +595,7 @@ class Enumerator
   def Enumerator.produce(init=NONE, &block)
     raise ArgumentError, "no block given" if block.nil?
     Enumerator.new do |y|
-      if init == NONE
+      if NONE.equal?(init)
         val = nil
       else
         val = init
@@ -647,8 +659,8 @@ module Kernel
   #       # => returns an Enumerator when called without a block
   #     enum.first(4) # => [1, 1, 1, 2]
   #
-  def to_enum(meth=:each, *args)
-    Enumerator.new self, meth, *args
+  def to_enum(meth=:each, *args, **kwd)
+    Enumerator.new self, meth, *args, **kwd
   end
   alias enum_for to_enum
 end
@@ -688,5 +700,143 @@ module Enumerable
     end
 
     result
+  end
+
+  ##
+  #  call-seq:
+  #    enum.chunk                 -> enumerator
+  #    enum.chunk { |arr| block } -> enumerator
+  #
+  #  Each element in the returned enumerator is a 2-element array consisting of:
+  #
+  #  - A value returned by the block.
+  #  - An array ("chunk") containing the element for which that value was returned,
+  #    and all following elements for which the block returned the same value:
+  #
+  #  So that:
+  #
+  #  - Each block return value that is different from its predecessor
+  #    begins a new chunk.
+  #  - Each block return value that is the same as its predecessor
+  #    continues the same chunk.
+  #
+  #  Example:
+  #
+  #     e = (0..10).chunk {|i| (i / 3).floor } # => #<Enumerator: ...>
+  #     # The enumerator elements.
+  #     e.next # => [0, [0, 1, 2]]
+  #     e.next # => [1, [3, 4, 5]]
+  #     e.next # => [2, [6, 7, 8]]
+  #     e.next # => [3, [9, 10]]
+  #
+  #  You can use the special symbol <tt>:_alone</tt> to force an element
+  #  into its own separate chuck:
+  #
+  #     a = [0, 0, 1, 1]
+  #     e = a.chunk{|i| i.even? ? :_alone : true }
+  #     e.to_a # => [[:_alone, [0]], [:_alone, [0]], [true, [1, 1]]]
+  #
+  #  You can use the special symbol <tt>:_separator</tt> or +nil+
+  #  to force an element to be ignored (not included in any chunk):
+  #
+  #     a = [0, 0, -1, 1, 1]
+  #     e = a.chunk{|i| i < 0 ? :_separator : true }
+  #     e.to_a # => [[true, [0, 0]], [true, [1, 1]]]
+  def chunk(&block)
+    return to_enum :chunk unless block
+
+    enum = self
+    Enumerator.new do |y|
+      last_value, arr = nil, []
+      enum.each do |element|
+        value = block.call(element)
+        case value
+        when :_alone
+          y.yield [last_value, arr] if arr.size > 0
+          y.yield [value, [element]]
+          last_value, arr = nil, []
+        when :_separator, nil
+          y.yield [last_value, arr] if arr.size > 0
+          last_value, arr = nil, []
+        when last_value
+          arr << element
+        else
+          raise 'symbols beginning with an underscore are reserved' if value.is_a?(Symbol) && value.to_s[0] == '_'
+          y.yield [last_value, arr] if arr.size > 0
+          last_value, arr = value, [element]
+        end
+      end
+      y.yield [last_value, arr] if arr.size > 0
+    end
+  end
+
+
+  ##
+  #  call-seq:
+  #     enum.chunk_while {|elt_before, elt_after| bool } -> an_enumerator
+  #
+  # Creates an enumerator for each chunked elements.
+  # The beginnings of chunks are defined by the block.
+  #
+  # This method splits each chunk using adjacent elements,
+  # _elt_before_ and _elt_after_,
+  # in the receiver enumerator.
+  # This method split chunks between _elt_before_ and _elt_after_ where
+  # the block returns <code>false</code>.
+  #
+  # The block is called the length of the receiver enumerator minus one.
+  #
+  # The result enumerator yields the chunked elements as an array.
+  # So +each+ method can be called as follows:
+  #
+  #   enum.chunk_while { |elt_before, elt_after| bool }.each { |ary| ... }
+  #
+  # Other methods of the Enumerator class and Enumerable module,
+  # such as +to_a+, +map+, etc., are also usable.
+  #
+  # For example, one-by-one increasing subsequence can be chunked as follows:
+  #
+  #   a = [1,2,4,9,10,11,12,15,16,19,20,21]
+  #   b = a.chunk_while {|i, j| i+1 == j }
+  #   p b.to_a #=> [[1, 2], [4], [9, 10, 11, 12], [15, 16], [19, 20, 21]]
+  #   c = b.map {|a| a.length < 3 ? a : "#{a.first}-#{a.last}" }
+  #   p c #=> [[1, 2], [4], "9-12", [15, 16], "19-21"]
+  #   d = c.join(",")
+  #   p d #=> "1,2,4,9-12,15,16,19-21"
+  #
+  # Increasing (non-decreasing) subsequence can be chunked as follows:
+  #
+  #   a = [0, 9, 2, 2, 3, 2, 7, 5, 9, 5]
+  #   p a.chunk_while {|i, j| i <= j }.to_a
+  #  #=> [[0, 9], [2, 2, 3], [2, 7], [5, 9], [5]]
+  #
+  # Adjacent evens and odds can be chunked as follows:
+  # (Enumerable#chunk is another way to do it.)
+  #
+  #   a = [7, 5, 9, 2, 0, 7, 9, 4, 2, 0]
+  #   p a.chunk_while {|i, j| i.even? == j.even? }.to_a
+  #   #=> [[7, 5, 9], [2, 0], [7, 9], [4, 2, 0]]
+  #
+  # Enumerable#slice_when does the same, except splitting when the block
+  # returns <code>true</code> instead of <code>false</code>.
+  #
+  def chunk_while(&block)
+    enum = self
+    Enumerator.new do |y|
+      n = 0
+      last_value, arr = nil, []
+      enum.each do |element|
+        if n > 0
+          unless block.call(last_value, element)
+            y.yield arr
+            arr = []
+          end
+        end
+        arr.push(element)
+        n += 1
+        last_value = element
+      end
+      y.yield arr if arr.size > 0
+    end
   end
 end

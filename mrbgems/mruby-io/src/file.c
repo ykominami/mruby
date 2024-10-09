@@ -2,13 +2,13 @@
 ** file.c - File class
 */
 
-#include "mruby.h"
-#include "mruby/class.h"
-#include "mruby/data.h"
-#include "mruby/string.h"
-#include "mruby/ext/io.h"
-#include "mruby/error.h"
-#include "mruby/presym.h"
+#include <mruby.h>
+#include <mruby/class.h>
+#include <mruby/data.h>
+#include <mruby/string.h>
+#include <mruby/ext/io.h>
+#include <mruby/error.h>
+#include <mruby/presym.h>
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -38,7 +38,9 @@
   #define GETCWD getcwd
   #define CHMOD(a, b) chmod(a,b)
   #include <sys/file.h>
+#ifndef __DJGPP__
   #include <libgen.h>
+#endif
   #include <sys/param.h>
   #include <pwd.h>
 #endif
@@ -82,13 +84,13 @@ typedef struct _stat64      mrb_stat;
 
 #ifdef _WIN32
 static int
-flock(int fd, int operation) {
-  OVERLAPPED ov;
+flock(int fd, int operation)
+{
   HANDLE h = (HANDLE)_get_osfhandle(fd);
   DWORD flags;
   flags = ((operation & LOCK_NB) ? LOCKFILE_FAIL_IMMEDIATELY : 0)
           | ((operation & LOCK_SH) ? LOCKFILE_EXCLUSIVE_LOCK : 0);
-  ov = (OVERLAPPED){0};
+  OVERLAPPED ov = (OVERLAPPED){0};
   return LockFileEx(h, flags, 0, 0xffffffff, 0xffffffff, &ov) ? 0 : -1;
 }
 #endif
@@ -105,7 +107,8 @@ mrb_file_s_umask(mrb_state *mrb, mrb_value klass)
   if (mrb_get_args(mrb, "|i", &mask) == 0) {
     omask = umask(0);
     umask(omask);
-  } else {
+  }
+  else {
     omask = umask(mask);
   }
   return mrb_fixnum_value(omask);
@@ -116,16 +119,14 @@ static mrb_value
 mrb_file_s_unlink(mrb_state *mrb, mrb_value obj)
 {
   const mrb_value *argv;
-  mrb_int argc, i;
-  char *path;
+  mrb_int argc;
 
   mrb_get_args(mrb, "*", &argv, &argc);
-  for (i = 0; i < argc; i++) {
-    const char *utf8_path;
+  for (int i = 0; i < argc; i++) {
     mrb_value pathv = argv[i];
     mrb_ensure_string_type(mrb, pathv);
-    utf8_path = RSTRING_CSTR(mrb, pathv);
-    path = mrb_locale_from_utf8(utf8_path, -1);
+    const char *utf8_path = RSTRING_CSTR(mrb, pathv);
+    char *path = mrb_locale_from_utf8(utf8_path, -1);
     if (UNLINK(path) < 0) {
       mrb_locale_free(path);
       mrb_sys_fail(mrb, utf8_path);
@@ -139,11 +140,10 @@ static mrb_value
 mrb_file_s_rename(mrb_state *mrb, mrb_value obj)
 {
   mrb_value from, to;
-  char *src, *dst;
 
   mrb_get_args(mrb, "SS", &from, &to);
-  src = mrb_locale_from_utf8(RSTRING_CSTR(mrb, from), -1);
-  dst = mrb_locale_from_utf8(RSTRING_CSTR(mrb, to), -1);
+  char *src = mrb_locale_from_utf8(RSTRING_CSTR(mrb, from), -1);
+  char *dst = mrb_locale_from_utf8(RSTRING_CSTR(mrb, to), -1);
   if (rename(src, dst) < 0) {
 #if defined(_WIN32) || defined(_WIN64)
     if (CHMOD(dst, 0666) == 0 && UNLINK(dst) == 0 && rename(src, dst) == 0) {
@@ -169,17 +169,16 @@ mrb_file_dirname(mrb_state *mrb, mrb_value klass)
   char dname[_MAX_DIR], vname[_MAX_DRIVE];
   char buffer[_MAX_DRIVE + _MAX_DIR];
   const char *utf8_path;
-  char *path;
-  size_t ridx;
   mrb_get_args(mrb, "z", &utf8_path);
-  path = mrb_locale_from_utf8(utf8_path, -1);
+  char *path = mrb_locale_from_utf8(utf8_path, -1);
   _splitpath(path, vname, dname, NULL, NULL);
   snprintf(buffer, _MAX_DRIVE + _MAX_DIR, "%s%s", vname, dname);
   mrb_locale_free(path);
-  ridx = strlen(buffer);
+  size_t ridx = strlen(buffer);
   if (ridx == 0) {
     strncpy(buffer, ".", 2);  /* null terminated */
-  } else if (ridx > 1) {
+  }
+  else if (ridx > 1) {
     ridx--;
     while (ridx > 0 && (buffer[ridx] == '/' || buffer[ridx] == '\\')) {
       buffer[ridx] = '\0';  /* remove last char */
@@ -188,11 +187,10 @@ mrb_file_dirname(mrb_state *mrb, mrb_value klass)
   }
   return mrb_str_new_cstr(mrb, buffer);
 #else
-  char *dname, *path;
   mrb_value s;
   mrb_get_args(mrb, "S", &s);
-  path = mrb_locale_from_utf8(mrb_str_to_cstr(mrb, s), -1);
-
+  char *path = mrb_locale_from_utf8(mrb_str_to_cstr(mrb, s), -1);
+  char *dname;
   if ((dname = dirname(path)) == NULL) {
     mrb_locale_free(path);
     mrb_sys_fail(mrb, "dirname");
@@ -209,14 +207,12 @@ mrb_file_basename(mrb_state *mrb, mrb_value klass)
 #if defined(_WIN32) || defined(_WIN64)
   char bname[_MAX_DIR];
   char extname[_MAX_EXT];
-  char *path;
-  size_t ridx;
   char buffer[_MAX_DIR + _MAX_EXT];
   mrb_value s;
 
   mrb_get_args(mrb, "S", &s);
-  path = mrb_str_to_cstr(mrb, s);
-  ridx = strlen(path);
+  char *path = mrb_str_to_cstr(mrb, s);
+  size_t ridx = strlen(path);
   if (ridx > 0) {
     ridx--;
     while (ridx > 0 && (path[ridx] == '/' || path[ridx] == '\\')) {
@@ -231,10 +227,10 @@ mrb_file_basename(mrb_state *mrb, mrb_value klass)
   snprintf(buffer, _MAX_DIR + _MAX_EXT, "%s%s", bname, extname);
   return mrb_str_new_cstr(mrb, buffer);
 #else
-  char *bname, *path;
   mrb_value s;
   mrb_get_args(mrb, "S", &s);
-  path = mrb_str_to_cstr(mrb, s);
+  char *path = mrb_str_to_cstr(mrb, s);
+  char *bname;
   if ((bname = basename(path)) == NULL) {
     mrb_sys_fail(mrb, "basename");
   }
@@ -246,22 +242,19 @@ mrb_file_basename(mrb_state *mrb, mrb_value klass)
 static mrb_value
 mrb_file_realpath(mrb_state *mrb, mrb_value klass)
 {
-  mrb_value pathname, dir_string, s, result;
-  mrb_int argc;
-  char *cpath;
-
-  argc = mrb_get_args(mrb, "S|S", &pathname, &dir_string);
+  mrb_value pathname, dir_string;
+  mrb_int argc = mrb_get_args(mrb, "S|S", &pathname, &dir_string);
   if (argc == 2) {
-    s = mrb_str_dup(mrb, dir_string);
+    mrb_value s = mrb_str_dup(mrb, dir_string);
     s = mrb_str_append(mrb, s, mrb_str_new_cstr(mrb, FILE_SEPARATOR));
     s = mrb_str_append(mrb, s, pathname);
     pathname = s;
   }
-  cpath = mrb_locale_from_utf8(RSTRING_CSTR(mrb, pathname), -1);
-  result = mrb_str_new_capa(mrb, PATH_MAX);
+  char *cpath = mrb_locale_from_utf8(RSTRING_CSTR(mrb, pathname), -1);
+  mrb_value result = mrb_str_new_capa(mrb, PATH_MAX);
   if (realpath(cpath, RSTRING_PTR(result)) == NULL) {
     mrb_locale_free(cpath);
-    mrb_sys_fail(mrb, cpath);
+    mrb_sys_fail(mrb, RSTRING_CSTR(mrb, pathname));
     return result;              /* not reached */
   }
   mrb_locale_free(cpath);
@@ -272,14 +265,14 @@ mrb_file_realpath(mrb_state *mrb, mrb_value klass)
 static mrb_value
 mrb_file__getwd(mrb_state *mrb, mrb_value klass)
 {
-  mrb_value path;
-  char buf[MAXPATHLEN], *utf8;
+  char buf[MAXPATHLEN];
 
+  mrb->c->ci->mid = 0;
   if (GETCWD(buf, MAXPATHLEN) == NULL) {
     mrb_sys_fail(mrb, "getcwd(2)");
   }
-  utf8 = mrb_utf8_from_locale(buf, -1);
-  path = mrb_str_new_cstr(mrb, utf8);
+  char *utf8 = mrb_utf8_from_locale(buf, -1);
+  mrb_value path = mrb_str_new_cstr(mrb, utf8);
   mrb_utf8_free(utf8);
   return path;
 }
@@ -298,13 +291,15 @@ is_absolute_traditional_path(const char *path, size_t len)
 }
 
 static int
-is_absolute_unc_path(const char *path, size_t len) {
+is_absolute_unc_path(const char *path, size_t len)
+{
   if (len < 2) return 0;
   return (CHECK_UNCDEV_PATH && !IS_DEVICEID(path[2]));
 }
 
 static int
-is_absolute_device_path(const char *path, size_t len) {
+is_absolute_device_path(const char *path, size_t len)
+{
   if (len < 4) return 0;
   return (CHECK_UNCDEV_PATH && IS_DEVICEID(path[2]) && IS_FILESEP(path[3]));
 }
@@ -340,23 +335,34 @@ mrb_file_is_absolute_path(const char *path)
 static mrb_value
 mrb_file__gethome(mrb_state *mrb, mrb_value klass)
 {
-  mrb_int argc;
   char *home;
   mrb_value path;
 
-#ifndef _WIN32
+  mrb->c->ci->mid = 0;
   mrb_value username;
 
-  argc = mrb_get_args(mrb, "|S", &username);
+  mrb_int argc = mrb_get_args(mrb, "|S", &username);
   if (argc == 0) {
     home = getenv("HOME");
     if (home == NULL) {
       return mrb_nil_value();
     }
+#ifdef _WIN32
+    home = getenv("USERPROFILE");
+    if (home == NULL) {
+      return mrb_nil_value();
+    }
+#endif
     if (!mrb_file_is_absolute_path(home)) {
       mrb_raise(mrb, E_ARGUMENT_ERROR, "non-absolute home");
     }
-  } else {
+  }
+#if defined(_WIN32) || defined(MRB_IO_NO_PWNAM)
+  else {
+    return mrb_nil_value();
+  }
+#else
+  else {
     const char *cuser = RSTRING_CSTR(mrb, username);
     struct passwd *pwd = getpwnam(cuser);
     if (pwd == NULL) {
@@ -367,28 +373,53 @@ mrb_file__gethome(mrb_state *mrb, mrb_value klass)
       mrb_raisef(mrb, E_ARGUMENT_ERROR, "non-absolute home of ~%v", username);
     }
   }
-  home = mrb_locale_from_utf8(home, -1);
-  path = mrb_str_new_cstr(mrb, home);
-  mrb_locale_free(home);
-  return path;
-#else  /* _WIN32 */
-  argc = mrb_get_argc(mrb);
-  if (argc == 0) {
-    home = getenv("USERPROFILE");
-    if (home == NULL) {
-      return mrb_nil_value();
-    }
-    if (!mrb_file_is_absolute_path(home)) {
-      mrb_raise(mrb, E_ARGUMENT_ERROR, "non-absolute home");
-    }
-  } else {
-    return mrb_nil_value();
-  }
-  home = mrb_locale_from_utf8(home, -1);
-  path = mrb_str_new_cstr(mrb, home);
-  mrb_locale_free(home);
-  return path;
 #endif
+  home = mrb_utf8_from_locale(home, -1);
+  path = mrb_str_new_cstr(mrb, home);
+  mrb_utf8_free(home);
+  return path;
+}
+
+#define TIME_OVERFLOW_P(a) (sizeof(time_t) >= sizeof(mrb_int) && ((a) > MRB_INT_MAX || (a) < MRB_INT_MIN))
+#define TIME_T_UINT (~(time_t)0 > 0)
+#if defined(MRB_USE_BITINT)
+#define TIME_BIGTIME(mrb, a)                                                   \
+  return (TIME_T_UINT ? mrb_bint_new_uint64((mrb), (uint64_t)(a))              \
+               : mrb_bint_new_int64(mrb, (int64_t)(a)))
+#elif !defined(MRB_NO_FLOAT)
+#define TIME_BIGTIME(mrb,a) return mrb_float_value((mrb), (mrb_float)(a))
+#else
+#define TIME_BIGTIME(mrb, a) mrb_raise(mrb, E_IO_ERROR, #a " overflow")
+#endif
+
+static mrb_value
+mrb_file_atime(mrb_state *mrb, mrb_value self)
+{
+  int fd = mrb_io_fileno(mrb, self);
+  mrb_stat st;
+
+  mrb->c->ci->mid = 0;
+  if (mrb_fstat(fd, &st) == -1)
+    mrb_sys_fail(mrb, "atime");
+  if (TIME_OVERFLOW_P(st.st_atime)) {
+    TIME_BIGTIME(mrb, st.st_atime);
+  }
+  return mrb_int_value(mrb, (mrb_int)st.st_atime);
+}
+
+static mrb_value
+mrb_file_ctime(mrb_state *mrb, mrb_value self)
+{
+  int fd = mrb_io_fileno(mrb, self);
+  mrb_stat st;
+
+  mrb->c->ci->mid = 0;
+  if (mrb_fstat(fd, &st) == -1)
+    mrb_sys_fail(mrb, "ctime");
+  if (TIME_OVERFLOW_P(st.st_ctime)) {
+    TIME_BIGTIME(mrb, st. st_ctime);
+  }
+  return mrb_int_value(mrb, (mrb_int)st.st_ctime);
 }
 
 static mrb_value
@@ -397,8 +428,12 @@ mrb_file_mtime(mrb_state *mrb, mrb_value self)
   int fd = mrb_io_fileno(mrb, self);
   mrb_stat st;
 
+  mrb->c->ci->mid = 0;
   if (mrb_fstat(fd, &st) == -1)
-    return mrb_false_value();
+    mrb_sys_fail(mrb, "mtime");
+  if (TIME_OVERFLOW_P(st.st_mtime)) {
+    TIME_BIGTIME(mrb, st. st_mtime);
+  }
   return mrb_int_value(mrb, (mrb_int)st.st_mtime);
 }
 
@@ -409,10 +444,9 @@ mrb_file_flock(mrb_state *mrb, mrb_value self)
   mrb_raise(mrb, E_NOTIMP_ERROR, "flock is not supported on Illumos/Solaris/Windows");
 #else
   mrb_int operation;
-  int fd;
 
   mrb_get_args(mrb, "i", &operation);
-  fd = mrb_io_fileno(mrb, self);
+  int fd = mrb_io_fileno(mrb, self);
 
   while (flock(fd, (int)operation) == -1) {
     switch (errno) {
@@ -440,9 +474,7 @@ static mrb_value
 mrb_file_size(mrb_state *mrb, mrb_value self)
 {
   mrb_stat st;
-  int fd;
-
-  fd = mrb_io_fileno(mrb, self);
+  int fd = mrb_io_fileno(mrb, self);
   if (mrb_fstat(fd, &st) == -1) {
     mrb_raise(mrb, E_RUNTIME_ERROR, "fstat failed");
   }
@@ -464,10 +496,8 @@ mrb_ftruncate(int fd, mrb_int length)
 #ifndef _WIN32
   return ftruncate(fd, (off_t)length);
 #else
-  HANDLE file;
   __int64 cur;
-
-  file = (HANDLE)_get_osfhandle(fd);
+  HANDLE file = (HANDLE)_get_osfhandle(fd);
   if (file == INVALID_HANDLE_VALUE) {
     return -1;
   }
@@ -491,12 +521,9 @@ mrb_ftruncate(int fd, mrb_int length)
 static mrb_value
 mrb_file_truncate(mrb_state *mrb, mrb_value self)
 {
-  int fd;
-  mrb_int length;
   mrb_value lenv = mrb_get_arg1(mrb);
-
-  fd = mrb_io_fileno(mrb, self);
-  length = mrb_as_int(mrb, lenv);
+  int fd = mrb_io_fileno(mrb, self);
+  mrb_int length = mrb_as_int(mrb, lenv);
   if (mrb_ftruncate(fd, length) != 0) {
     mrb_raise(mrb, E_IO_ERROR, "ftruncate failed");
   }
@@ -511,12 +538,10 @@ mrb_file_s_symlink(mrb_state *mrb, mrb_value klass)
   mrb_raise(mrb, E_NOTIMP_ERROR, "symlink is not supported on this platform");
 #else
   mrb_value from, to;
-  const char *src, *dst;
-  int ai = mrb_gc_arena_save(mrb);
 
   mrb_get_args(mrb, "SS", &from, &to);
-  src = mrb_locale_from_utf8(RSTRING_CSTR(mrb, from), -1);
-  dst = mrb_locale_from_utf8(RSTRING_CSTR(mrb, to), -1);
+  const char *src = mrb_locale_from_utf8(RSTRING_CSTR(mrb, from), -1);
+  const char *dst = mrb_locale_from_utf8(RSTRING_CSTR(mrb, to), -1);
   if (symlink(src, dst) == -1) {
     mrb_locale_free(src);
     mrb_locale_free(dst);
@@ -524,20 +549,20 @@ mrb_file_s_symlink(mrb_state *mrb, mrb_value klass)
   }
   mrb_locale_free(src);
   mrb_locale_free(dst);
-  mrb_gc_arena_restore(mrb, ai);
 #endif
   return mrb_fixnum_value(0);
 }
 
 static mrb_value
-mrb_file_s_chmod(mrb_state *mrb, mrb_value klass) {
+mrb_file_s_chmod(mrb_state *mrb, mrb_value klass)
+{
   mrb_int mode;
-  mrb_int argc, i;
+  mrb_int argc;
   const mrb_value *filenames;
   int ai = mrb_gc_arena_save(mrb);
 
   mrb_get_args(mrb, "i*", &mode, &filenames, &argc);
-  for (i = 0; i < argc; i++) {
+  for (int i = 0; i < argc; i++) {
     const char *utf8_path = RSTRING_CSTR(mrb, filenames[i]);
     char *path = mrb_locale_from_utf8(utf8_path, -1);
     if (CHMOD(path, mode) == -1) {
@@ -552,7 +577,8 @@ mrb_file_s_chmod(mrb_state *mrb, mrb_value klass) {
 }
 
 static mrb_value
-mrb_file_s_readlink(mrb_state *mrb, mrb_value klass) {
+mrb_file_s_readlink(mrb_state *mrb, mrb_value klass)
+{
 #if defined(_WIN32) || defined(_WIN64)
   mrb_raise(mrb, E_NOTIMP_ERROR, "readlink is not supported on this platform");
   return mrb_nil_value(); // unreachable
@@ -562,15 +588,14 @@ mrb_file_s_readlink(mrb_state *mrb, mrb_value klass) {
   size_t bufsize = 100;
   ssize_t rc;
   mrb_value ret;
-  int ai = mrb_gc_arena_save(mrb);
 
   mrb_get_args(mrb, "z", &path);
   tmp = mrb_locale_from_utf8(path, -1);
 
-  buf = (char *)mrb_malloc(mrb, bufsize);
+  buf = (char*)mrb_malloc(mrb, bufsize);
   while ((rc = readlink(tmp, buf, bufsize)) == (ssize_t)bufsize && rc != -1) {
     bufsize *= 2;
-    buf = (char *)mrb_realloc(mrb, buf, bufsize);
+    buf = (char*)mrb_realloc(mrb, buf, bufsize);
   }
   mrb_locale_free(tmp);
   if (rc == -1) {
@@ -579,10 +604,9 @@ mrb_file_s_readlink(mrb_state *mrb, mrb_value klass) {
   }
   tmp = mrb_utf8_from_locale(buf, -1);
   ret = mrb_str_new(mrb, tmp, rc);
-  mrb_locale_free(tmp);
+  mrb_utf8_free(tmp);
   mrb_free(mrb, buf);
 
-  mrb_gc_arena_restore(mrb, ai);
   return ret;
 #endif
 }
@@ -590,31 +614,31 @@ mrb_file_s_readlink(mrb_state *mrb, mrb_value klass) {
 void
 mrb_init_file(mrb_state *mrb)
 {
-  struct RClass *io, *file, *cnst;
+  struct RClass *io   = mrb_class_get_id(mrb, MRB_SYM(IO));
+  struct RClass *file = mrb_define_class_id(mrb, MRB_SYM(File), io);
+  MRB_SET_INSTANCE_TT(file, MRB_TT_CDATA);
+  mrb_define_class_method_id(mrb, file, MRB_SYM(umask),  mrb_file_s_umask, MRB_ARGS_OPT(1));
+  mrb_define_class_method_id(mrb, file, MRB_SYM(delete), mrb_file_s_unlink, MRB_ARGS_ANY());
+  mrb_define_class_method_id(mrb, file, MRB_SYM(unlink), mrb_file_s_unlink, MRB_ARGS_ANY());
+  mrb_define_class_method_id(mrb, file, MRB_SYM(rename), mrb_file_s_rename, MRB_ARGS_REQ(2));
+  mrb_define_class_method_id(mrb, file, MRB_SYM(symlink), mrb_file_s_symlink, MRB_ARGS_REQ(2));
+  mrb_define_class_method_id(mrb, file, MRB_SYM(chmod), mrb_file_s_chmod, MRB_ARGS_REQ(1) | MRB_ARGS_REST());
+  mrb_define_class_method_id(mrb, file, MRB_SYM(readlink), mrb_file_s_readlink, MRB_ARGS_REQ(1));
 
-  io   = mrb_class_get_id(mrb, MRB_SYM(IO));
-  file = mrb_define_class(mrb, "File", io);
-  MRB_SET_INSTANCE_TT(file, MRB_TT_DATA);
-  mrb_define_class_method(mrb, file, "umask",  mrb_file_s_umask, MRB_ARGS_OPT(1));
-  mrb_define_class_method(mrb, file, "delete", mrb_file_s_unlink, MRB_ARGS_ANY());
-  mrb_define_class_method(mrb, file, "unlink", mrb_file_s_unlink, MRB_ARGS_ANY());
-  mrb_define_class_method(mrb, file, "rename", mrb_file_s_rename, MRB_ARGS_REQ(2));
-  mrb_define_class_method(mrb, file, "symlink", mrb_file_s_symlink, MRB_ARGS_REQ(2));
-  mrb_define_class_method(mrb, file, "chmod", mrb_file_s_chmod, MRB_ARGS_REQ(1) | MRB_ARGS_REST());
-  mrb_define_class_method(mrb, file, "readlink", mrb_file_s_readlink, MRB_ARGS_REQ(1));
+  mrb_define_class_method_id(mrb, file, MRB_SYM(dirname),   mrb_file_dirname,    MRB_ARGS_REQ(1));
+  mrb_define_class_method_id(mrb, file, MRB_SYM(basename),  mrb_file_basename,   MRB_ARGS_REQ(1));
+  mrb_define_class_method_id(mrb, file, MRB_SYM(realpath),  mrb_file_realpath,   MRB_ARGS_REQ(1)|MRB_ARGS_OPT(1));
+  mrb_define_class_method_id(mrb, file, MRB_SYM(_getwd),    mrb_file__getwd,     MRB_ARGS_NONE());
+  mrb_define_class_method_id(mrb, file, MRB_SYM(_gethome),  mrb_file__gethome,   MRB_ARGS_OPT(1));
 
-  mrb_define_class_method(mrb, file, "dirname",   mrb_file_dirname,    MRB_ARGS_REQ(1));
-  mrb_define_class_method(mrb, file, "basename",  mrb_file_basename,   MRB_ARGS_REQ(1));
-  mrb_define_class_method(mrb, file, "realpath",  mrb_file_realpath,   MRB_ARGS_REQ(1)|MRB_ARGS_OPT(1));
-  mrb_define_class_method(mrb, file, "_getwd",    mrb_file__getwd,     MRB_ARGS_NONE());
-  mrb_define_class_method(mrb, file, "_gethome",  mrb_file__gethome,   MRB_ARGS_OPT(1));
+  mrb_define_method_id(mrb, file, MRB_SYM(flock), mrb_file_flock, MRB_ARGS_REQ(1));
+  mrb_define_method_id(mrb, file, MRB_SYM(_atime), mrb_file_atime, MRB_ARGS_NONE());
+  mrb_define_method_id(mrb, file, MRB_SYM(_ctime), mrb_file_ctime, MRB_ARGS_NONE());
+  mrb_define_method_id(mrb, file, MRB_SYM(_mtime), mrb_file_mtime, MRB_ARGS_NONE());
+  mrb_define_method_id(mrb, file, MRB_SYM(size), mrb_file_size, MRB_ARGS_NONE());
+  mrb_define_method_id(mrb, file, MRB_SYM(truncate), mrb_file_truncate, MRB_ARGS_REQ(1));
 
-  mrb_define_method(mrb, file, "flock", mrb_file_flock, MRB_ARGS_REQ(1));
-  mrb_define_method(mrb, file, "_mtime", mrb_file_mtime, MRB_ARGS_NONE());
-  mrb_define_method(mrb, file, "size", mrb_file_size, MRB_ARGS_NONE());
-  mrb_define_method(mrb, file, "truncate", mrb_file_truncate, MRB_ARGS_REQ(1));
-
-  cnst = mrb_define_module_under_id(mrb, file, MRB_SYM(Constants));
+  struct RClass *cnst = mrb_define_module_under_id(mrb, file, MRB_SYM(Constants));
   mrb_define_const_id(mrb, cnst, MRB_SYM(LOCK_SH), mrb_fixnum_value(LOCK_SH));
   mrb_define_const_id(mrb, cnst, MRB_SYM(LOCK_EX), mrb_fixnum_value(LOCK_EX));
   mrb_define_const_id(mrb, cnst, MRB_SYM(LOCK_UN), mrb_fixnum_value(LOCK_UN));

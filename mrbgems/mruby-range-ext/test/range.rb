@@ -55,13 +55,10 @@ assert('Range#size') do
   skip unless Object.const_defined?(:Float)
   assert_equal 6, (1...6.3).size
   assert_equal 5, (1...6.0).size
-  assert_equal 5, (1.1...6).size
-  assert_equal 15, (1.0..15.9).size
   assert_equal Float::INFINITY, (0..Float::INFINITY).size
 
   assert_equal Float::INFINITY, (1..).size
   assert_equal Float::INFINITY, (1...).size
-  assert_equal Float::INFINITY, (1.0..).size
 end
 
 assert('Range#max') do
@@ -177,4 +174,38 @@ assert('Range#min given a block') do
   # returns nil when the start point is greater than the endpoint
   assert_equal nil, ((100..10).min { |x, y| x <=> y })
   assert_equal nil, ((5...5).min { |x, y| x <=> y })
+end
+
+assert('Range#overlap?') do
+  assert_false((0..2).overlap?(-2..-1))
+  assert_false((0..2).overlap?(-2...0))
+  assert_true((0..2).overlap?(-1..0))
+  assert_true((0..2).overlap?(1..2))
+  assert_true((0..2).overlap?(2..3))
+  assert_false((0..2).overlap?(3...4))
+  assert_false((0...2).overlap?(2..3))
+
+  assert_true((..0).overlap?(-1..0))
+  assert_true((...0).overlap?(-1..0))
+  assert_true((..0).overlap?(0..1))
+  assert_true((..0).overlap?(..1))
+  assert_false((..0).overlap?(1..2))
+  assert_false((...0).overlap?(0..1))
+
+  assert_false((0..).overlap?(-2..-1))
+  assert_false((0..).overlap?(...0))
+  assert_true((0..).overlap?(..0))
+  assert_true((0..).overlap?(0..1))
+  assert_true((0..).overlap?(1..2))
+  assert_true((0..).overlap?(-1..0))
+  assert_true((0..).overlap?(1..))
+
+  assert_true((0..).overlap?(-1..0))
+  assert_true((0..).overlap?(..0))
+  assert_true((0..).overlap?(0..1))
+  assert_true((0..).overlap?(1..2))
+  assert_true((0..).overlap?(1..))
+
+  assert_raise(TypeError) { (0..).overlap?(1) }
+  assert_raise(TypeError) { (0..).overlap?(nil) }
 end

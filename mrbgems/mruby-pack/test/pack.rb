@@ -1,4 +1,3 @@
-# coding: utf-8
 PACK_IS_LITTLE_ENDIAN = "\x01\00".unpack('S')[0] == 0x01
 
 def assert_pack tmpl, packed, unpacked
@@ -37,6 +36,16 @@ assert('pack("M")') do
   assert_equal ["123"], "123=\n".unpack("M")
   assert_equal ["=\n"], "=3D\n".unpack("M")
   assert_equal ["あ"], "=E3=81=82=\n".unpack("M")
+end
+
+# pack & unpack 'B'/'b'
+assert('pack("B/b")') do
+  assert_pack "b*", "\xFF\x00", ["1111111100000000"]
+  assert_pack "b*", "\x01\x02", ["1000000001000000"]
+  assert_pack "b3", "\x01", ["100"]
+
+  assert_pack "B*", "\xFF\x00", ["1111111100000000"]
+  assert_pack "B*", "\x01\x02", ["0000000100000010"]
 end
 
 # pack & unpack 'H'
@@ -146,4 +155,19 @@ assert 'pack/unpack "U"' do
   assert_raise(RangeError) { [-0x40000000].pack("U") }
   assert_raise(RangeError) { [-1].pack("U") }
   assert_raise(RangeError) { [0x40000000].pack("U") }
+end
+
+assert 'unpack1' do
+  d = 1234
+  assert_equal(d, [d].pack("i").unpack1("i"))
+  d = "foobar"
+  assert_equal(d, [d].pack("a*").unpack1("a*"))
+  assert_equal(d, [d].pack("A*").unpack1("A*"))
+  assert_equal(d, [d].pack("Z*").unpack1("Z*"))
+  assert_equal(d, [d].pack("m").unpack1("m"))
+  assert_equal(d, [d].pack("M").unpack1("M"))
+  d = "10010101"
+  assert_equal(d, [d].pack("b*").unpack1("b*"))
+  d = "f00b00"
+  assert_equal(d, [d].pack("h*").unpack1("h*"))
 end

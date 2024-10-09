@@ -14,10 +14,10 @@ Add the line below to your build configuration.
 
 ### IO
 
-* <https://doc.ruby-lang.org/ja/1.9.3/class/IO.html>
+- <https://doc.ruby-lang.org/ja/1.9.3/class/IO.html>
 
 | method                     | mruby-io | memo     |
-|----------------------------|----------|----------|
+| -------------------------- | -------- | -------- |
 | IO.binread                 |          |          |
 | IO.binwrite                |          |          |
 | IO.copy_stream             |          |          |
@@ -99,10 +99,10 @@ Add the line below to your build configuration.
 
 ### File
 
-* <https://doc.ruby-lang.org/ja/1.9.3/class/File.html>
+- <https://doc.ruby-lang.org/ja/1.9.3/class/File.html>
 
 | method                      | mruby-io | memo     |
-|-----------------------------|----------|----------|
+| --------------------------- | -------- | -------- |
 | File.absolute_path          |          |          |
 | File.atime                  |          |          |
 | File.basename               | o        |          |
@@ -158,16 +158,21 @@ Add the line below to your build configuration.
 | File.writable?              |          | FileTest |
 | File.writable_real?         |          | FileTest |
 | File.zero?                  | o        | FileTest |
-| File#atime                  |          |          |
+| File#atime                  | o        |          |
 | File#chmod                  |          |          |
 | File#chown                  |          |          |
-| File#ctime                  |          |          |
+| File#ctime                  | o        |          |
 | File#flock                  | o        |          |
 | File#lstat                  |          |          |
-| File#mtime                  |          |          |
-| File#path, File#to_path     | o        |          |
+| File#mtime                  | o        |          |
+| File#path                   | o        |          |
 | File#size                   |          |          |
 | File#truncate               |          |          |
+
+## Porting Note
+
+If your (non Windows) platform does not support `getpwnam(3)` for some reason, define `MRB_IO_NO_PWNAM`.
+See [mruby#5358](https://github.com/mruby/mruby/issues/5358).
 
 ## License
 

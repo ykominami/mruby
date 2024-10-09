@@ -18,8 +18,8 @@ MRB_BEGIN_DECL
 enum irep_pool_type {
   IREP_TT_STR   = 0,          /* string (need free) */
   IREP_TT_SSTR  = 2,          /* string (static) */
-  IREP_TT_INT32 = 1,          /* 32bit integer */
-  IREP_TT_INT64 = 3,          /* 64bit integer */
+  IREP_TT_INT32 = 1,          /* 32-bit integer */
+  IREP_TT_INT64 = 3,          /* 64-bit integer */
   IREP_TT_BIGINT = 7,         /* big integer (not yet supported) */
   IREP_TT_FLOAT = 5,          /* float (double/float) */
 };
@@ -84,15 +84,22 @@ struct mrb_irep {
 
 MRB_API mrb_irep *mrb_add_irep(mrb_state *mrb);
 
-/** load mruby bytecode functions
-* Please note! Currently due to interactions with the GC calling these functions will
-* leak one RProc object per function call.
-* To prevent this save the current memory arena before calling and restore the arena
-* right after, like so
-* int ai = mrb_gc_arena_save(mrb);
-* mrb_value status = mrb_load_irep(mrb, buffer);
-* mrb_gc_arena_restore(mrb, ai);
-*/
+/**
+ * load mruby bytecode functions
+ *
+ * Please note! Currently due to interactions with the GC calling these functions will
+ * leak one RProc object per function call.
+ * To prevent this save the current memory arena before calling and restore the arena
+ * right after, like so
+ *
+ *      int ai = mrb_gc_arena_save(mrb);
+ *      mrb_value status = mrb_load_irep(mrb, buffer);
+ *      mrb_gc_arena_restore(mrb, ai);
+ *
+ * Also, when called from a C function defined as a method, the current stack is destroyed.
+ * If processing continues after this function, the objects obtained from the arguments
+ * must be protected as needed before this function.
+ */
 
 /* @param [const uint8_t*] irep code, expected as a literal */
 MRB_API mrb_value mrb_load_irep(mrb_state*, const uint8_t*);
@@ -104,13 +111,13 @@ MRB_API mrb_value mrb_load_irep(mrb_state*, const uint8_t*);
 MRB_API mrb_value mrb_load_irep_buf(mrb_state*, const void*, size_t);
 
 /* @param [const uint8_t*] irep code, expected as a literal */
-MRB_API mrb_value mrb_load_irep_cxt(mrb_state*, const uint8_t*, mrbc_context*);
+MRB_API mrb_value mrb_load_irep_cxt(mrb_state*, const uint8_t*, mrb_ccontext*);
 
 /*
  * @param [const void*] irep code
  * @param [size_t] size of irep buffer.
  */
-MRB_API mrb_value mrb_load_irep_buf_cxt(mrb_state*, const void*, size_t, mrbc_context*);
+MRB_API mrb_value mrb_load_irep_buf_cxt(mrb_state*, const void*, size_t, mrb_ccontext*);
 
 struct mrb_insn_data {
   uint8_t insn;

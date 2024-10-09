@@ -6,12 +6,27 @@ permissions:
   contents: read
 
 jobs:
-  Ubuntu-1804-gcc:
-    runs-on: ubuntu-18.04
+  GCC-CLANG:
+    name: "${{ matrix.os }}-${{ matrix.altname || matrix.cc }}"
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        include:
+          - {os: ubuntu-22.04, cc: gcc, cxx: g++}
+          - {os: ubuntu-22.04, cc: clang, cxx: clang++}
+          - {os: ubuntu-20.04, cc: gcc, cxx: g++}
+          - {os: ubuntu-20.04, cc: clang, cxx: clang++}
+          - {os: macos-latest, cc: clang, cxx: clang++}
+          - {os: macos-12, cc: clang, cxx: clang++}
+          - {os: windows-latest, cc: gcc, cxx: g++, altname: "mingw-gcc"}
     env:
       MRUBY_CONFIG: ci/gcc-clang
-      CC: gcc
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+      LD: ${{ matrix.cc }}
     steps:
       - uses: actions/checkout@v4
       - name: Ruby version

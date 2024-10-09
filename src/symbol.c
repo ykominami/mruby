@@ -26,11 +26,10 @@ presym_find(const char *name, size_t len)
 {
   if (presym_length_table[MRB_PRESYM_MAX-1] < len) return 0;
 
-  mrb_sym start, idx, presym_size = MRB_PRESYM_MAX;
-  int cmp;
-  for (start = 0; presym_size != 0; presym_size/=2) {
-    idx = start+presym_size/2;
-    cmp = (int)len-(int)presym_length_table[idx];
+  mrb_sym presym_size = MRB_PRESYM_MAX;
+  for (mrb_sym start = 0; presym_size != 0; presym_size/=2) {
+    mrb_sym idx = start+presym_size/2;
+    int cmp = (int)len-(int)presym_length_table[idx];
     if (cmp == 0) {
       cmp = memcmp(name, presym_name_table[idx], len);
       if (cmp == 0) return idx+1;
@@ -80,21 +79,17 @@ sym_inline_pack(const char *name, size_t len)
   const size_t pack_length_max = 5;
 #endif
 
-  char c;
-  const char *p;
-  size_t i;
   mrb_sym sym = 0;
 
   if (len > pack_length_max) return 0; /* too long */
   if (len == 0) return 0; /* empty string */
-  for (i=0; i<len; i++) {
-    uint32_t bits;
-
-    c = name[i];
+  for (size_t i=0; i<len; i++) {
+    char c = name[i];
     if (c == 0) return 0;       /* NUL in name */
-    p = strchr(pack_table, (int)c);
+    const char *p = strchr(pack_table, (int)c);
     if (p == 0) return 0;       /* non alnum char */
-    bits = (uint32_t)(p - pack_table)+1;
+
+    uint32_t bits = (uint32_t)(p - pack_table)+1;
     sym |= bits<<(24-i*6);
   }
   mrb_assert(SYMBOL_INLINE_P(sym));
@@ -111,7 +106,7 @@ sym_inline_unpack(mrb_sym sym, char *buf, mrb_int *lenp)
   for (i=0; i<5; i++) {
     uint32_t bits = sym>>(24-i*6) & 0x3f;
     if (bits == 0) break;
-    buf[i] = pack_table[bits-1];;
+    buf[i] = pack_table[bits-1];
   }
   buf[i] = '\0';
   if (lenp) *lenp = i;
@@ -122,7 +117,6 @@ sym_inline_unpack(mrb_sym sym, char *buf, mrb_int *lenp)
 #define sym_lit_p(mrb, i) (mrb->symflags[i>>3]&(1<<(i&7)))
 #define sym_lit_set(mrb, i) mrb->symflags[i>>3]|=(1<<(i&7))
 #define sym_flags_clear(mrb, i) mrb->symflags[i>>3]&=~(1<<(i&7))
-#define sym_len(mrb, i) (size_t)(sym_lit_p(mrb, i)?strlen(mrb->symtbl[i]):mrb_packed_int_decode(mrb->symtbl[i],NULL))
 
 static mrb_bool
 sym_check(mrb_state *mrb, const char *name, size_t len, mrb_sym i)
@@ -208,15 +202,15 @@ sym_intern(mrb_state *mrb, const char *name, size_t len, mrb_bool lit)
     mrb->symcapa = symcapa;
   }
   sym_flags_clear(mrb, sym);
-  if ((lit || mrb_ro_data_p(name)) && strlen(name) == len) {
+  if ((lit || mrb_ro_data_p(name)) && name[len] == 0 && strlen(name) == len) {
     sym_lit_set(mrb, sym);
     mrb->symtbl[sym] = name;
   }
   else {
     uint32_t ulen = (uint32_t)len;
     size_t ilen = mrb_packed_int_len(ulen);
-    char *p = (char *)mrb_malloc(mrb, len+ilen+1);
-    mrb_packed_int_encode(ulen, (uint8_t*)p, (uint8_t*)p+ilen);
+    char *p = (char*)mrb_malloc(mrb, len+ilen+1);
+    mrb_packed_int_encode(ulen, (uint8_t*)p);
     memcpy(p+ilen, name, len);
     p[ilen+len] = 0;
     mrb->symtbl[sym] = p;
@@ -353,7 +347,7 @@ mrb_free_symtbl(mrb_state *mrb)
 {
   mrb_sym i, lim;
 
-  for (i=1, lim=mrb->symidx+1; i<lim; i++) {
+  for (i=1,lim=mrb->symidx+1; i<lim; i++) {
     if (!sym_lit_p(mrb, i)) {
       mrb_free(mrb, (char*)mrb->symtbl[i]);
     }
@@ -443,6 +437,8 @@ sym_name(mrb_state *mrb, mrb_value vsym)
 
 /* 15.2.11.3.4  */
 /*
+ * Document-method: Symbol#to_sym
+ *
  * call-seq:
  *   sym.to_sym   -> sym
  *   sym.intern   -> sym
@@ -451,12 +447,6 @@ sym_name(mrb_state *mrb, mrb_value vsym)
  * to an object. As <i>sym</i> is already a symbol, <code>self</code> is returned
  * in this case.
  */
-
-static mrb_value
-sym_to_sym(mrb_state *mrb, mrb_value sym)
-{
-  return sym;
-}
 
 /* 15.2.11.3.5(x)  */
 /*
@@ -485,15 +475,15 @@ is_special_global_name(const char* m)
     case ':': case '<': case '>': case '\"':
     case '&': case '`': case '\'': case '+':
     case '0':
-      ++m;
+      m++;
       break;
     case '-':
-      ++m;
+      m++;
       if (is_identchar(*m)) m += 1;
       break;
     default:
       if (!ISDIGIT(*m)) return FALSE;
-      do ++m; while (ISDIGIT(*m));
+      do m++; while (ISDIGIT(*m));
       break;
   }
   return !*m;
@@ -521,7 +511,7 @@ symname_p(const char *name)
     case '<':
       switch (*++m) {
         case '<': ++m; break;
-        case '=': if (*++m == '>') ++m; break;
+        case '=': if (*++m == '>') m++; break;
         default: break;
       }
       break;
@@ -535,37 +525,37 @@ symname_p(const char *name)
 
     case '=':
       switch (*++m) {
-        case '~': ++m; break;
-        case '=': if (*++m == '=') ++m; break;
+        case '~': m++; break;
+        case '=': if (*++m == '=') m++; break;
         default: return FALSE;
       }
       break;
 
     case '*':
-      if (*++m == '*') ++m;
+      if (*++m == '*') m++;
       break;
     case '!':
       switch (*++m) {
-        case '=': case '~': ++m;
+        case '=': case '~': m++;
       }
       break;
     case '+': case '-':
-      if (*++m == '@') ++m;
+      if (*++m == '@') m++;
       break;
     case '|':
-      if (*++m == '|') ++m;
+      if (*++m == '|') m++;
       break;
     case '&':
-      if (*++m == '&') ++m;
+      if (*++m == '&') m++;
       break;
 
     case '^': case '/': case '%': case '~': case '`':
-      ++m;
+      m++;
       break;
 
     case '[':
       if (*++m != ']') return FALSE;
-      if (*++m == '=') ++m;
+      if (*++m == '=') m++;
       break;
 
     default:
@@ -575,7 +565,7 @@ id:
       while (is_identchar(*m)) m += 1;
       if (localid) {
         switch (*m) {
-          case '!': case '?': case '=': ++m;
+          case '!': case '?': case '=': m++;
           default: break;
         }
       }
@@ -692,13 +682,14 @@ mrb_init_symbol(mrb_state *mrb)
 {
   struct RClass *sym;
 
-  mrb->symbol_class = sym = mrb_define_class(mrb, "Symbol", mrb->object_class);  /* 15.2.11 */
+  mrb->symbol_class = sym = mrb_define_class_id(mrb, MRB_SYM(Symbol), mrb->object_class);  /* 15.2.11 */
   MRB_SET_INSTANCE_TT(sym, MRB_TT_SYMBOL);
-  mrb_undef_class_method(mrb,  sym, "new");
+  mrb_undef_class_method_id(mrb,  sym, MRB_SYM(new));
 
-  mrb_define_method(mrb, sym, "to_s",    sym_to_s,    MRB_ARGS_NONE());          /* 15.2.11.3.3 */
-  mrb_define_method(mrb, sym, "name",    sym_name,    MRB_ARGS_NONE());
-  mrb_define_method(mrb, sym, "to_sym",  sym_to_sym,  MRB_ARGS_NONE());          /* 15.2.11.3.4 */
-  mrb_define_method(mrb, sym, "inspect", sym_inspect, MRB_ARGS_NONE());          /* 15.2.11.3.5(x) */
-  mrb_define_method(mrb, sym, "<=>",     sym_cmp,     MRB_ARGS_REQ(1));
+  mrb_define_method_id(mrb, sym, MRB_SYM(to_s),    sym_to_s,    MRB_ARGS_NONE());          /* 15.2.11.3.3 */
+  mrb_define_method_id(mrb, sym, MRB_SYM(name),    sym_name,    MRB_ARGS_NONE());
+  mrb_define_method_id(mrb, sym, MRB_SYM(to_sym),  mrb_obj_itself,  MRB_ARGS_NONE());      /* 15.2.11.3.4 */
+  mrb_define_method_id(mrb, sym, MRB_SYM(inspect), sym_inspect, MRB_ARGS_NONE());          /* 15.2.11.3.5(x) */
+  mrb_define_method_id(mrb, sym, MRB_OPSYM(cmp),   sym_cmp,     MRB_ARGS_REQ(1));
+  mrb_define_method_id(mrb, sym, MRB_OPSYM(eq),    mrb_obj_equal_m,      MRB_ARGS_REQ(1));
 }

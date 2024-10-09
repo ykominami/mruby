@@ -19,6 +19,13 @@ class Complex < Numeric
     Complex(-real, -imaginary)
   end
 
+  def <=>(other)
+    return nil unless other.kind_of?(Numeric)
+    self.to_f <=> other.to_f
+  rescue
+    nil
+  end
+
   def abs
     Math.hypot imaginary, real
   end
@@ -73,4 +80,10 @@ class Complex < Numeric
     end
   end
   undef i
+end
+
+class Numeric
+  def to_c
+    Complex(self, 0)
+  end
 end

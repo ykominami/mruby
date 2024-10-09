@@ -1,12 +1,13 @@
-#include "mruby.h"
-#include "mruby/array.h"
-#include "mruby/hash.h"
-#include "mruby/variable.h"
-#include "mruby/proc.h"
-#include "mruby/class.h"
-#include "mruby/string.h"
+#include <mruby.h>
+#include <mruby/array.h>
+#include <mruby/hash.h>
+#include <mruby/variable.h>
+#include <mruby/proc.h>
+#include <mruby/class.h>
+#include <mruby/string.h>
 #include <mruby/internal.h>
-#include "mruby/presym.h"
+#include <mruby/khash.h>
+#include <mruby/presym.h>
 
 typedef enum {
   NOEX_PUBLIC    = 0x00,
@@ -21,8 +22,6 @@ typedef enum {
   NOEX_VCALL     = 0x40,
   NOEX_RESPONDS  = 0x80
 } mrb_method_flag_t;
-
-mrb_value mrb_proc_local_variables(mrb_state *mrb, const struct RProc *proc);
 
 static mrb_value
 mrb_f_nil(mrb_state *mrb, mrb_value cv)
@@ -178,7 +177,6 @@ static mrb_value
 mrb_class_instance_method_list(mrb_state *mrb, mrb_bool recur, struct RClass *klass)
 {
   mrb_value ary;
-  struct RClass *oldklass;
   khash_t(st) *set = kh_init(st, mrb);
 
   if (!recur) {
@@ -189,8 +187,8 @@ mrb_class_instance_method_list(mrb_state *mrb, mrb_bool recur, struct RClass *kl
   }
   else {
     khash_t(st) *undef = kh_init(st, mrb);
+    struct RClass *oldklass = NULL;
 
-    oldklass = NULL;
     while (klass && (klass != oldklass)) {
       method_entry_loop(mrb, klass, set, undef);
       oldklass = klass;
@@ -296,7 +294,6 @@ mrb_obj_public_methods(mrb_state *mrb, mrb_value self)
 static mrb_value
 mrb_obj_singleton_methods(mrb_state *mrb, mrb_bool recur, mrb_value obj)
 {
-  khint_t i;
   mrb_value ary;
   struct RClass *klass;
   khash_t(st) *set = kh_init(st, mrb);
@@ -316,7 +313,7 @@ mrb_obj_singleton_methods(mrb_state *mrb, mrb_bool recur, mrb_value obj)
   }
 
   ary = mrb_ary_new(mrb);
-  for (i=0;i<kh_end(set);i++) {
+  for (khint_t i=0;i<kh_end(set);i++) {
     if (kh_exist(set, i)) {
       mrb_ary_push(mrb, ary, mrb_symbol_value(kh_key(set, i)));
     }
@@ -626,10 +623,12 @@ mrb_mod_remove_method(mrb_state *mrb, mrb_value mod)
   struct RClass *c = mrb_class_ptr(mod);
 
   mrb_get_args(mrb, "*", &argv, &argc);
-  mrb_check_frozen(mrb, mrb_obj_ptr(mod));
+  mrb_check_frozen(mrb, c);
+  int ai = mrb_gc_arena_save(mrb);
   while (argc--) {
     mrb_remove_method(mrb, c, mrb_obj_to_sym(mrb, *argv));
-    mrb_funcall_id(mrb, mod, MRB_SYM(method_removed), 1, *argv);
+    mrb_funcall_argv(mrb, mod, MRB_SYM(method_removed), 1, argv);
+    mrb_gc_arena_restore(mrb, ai);
     argv++;
   }
   return mod;
@@ -665,44 +664,41 @@ mrb_mod_s_nesting(mrb_state *mrb, mrb_value mod)
   return ary;
 }
 
-/* implementation of #send method */
-mrb_value mrb_f_send(mrb_state *mrb, mrb_value self);
-
 void
 mrb_mruby_metaprog_gem_init(mrb_state* mrb)
 {
   struct RClass *krn = mrb->kernel_module;
   struct RClass *mod = mrb->module_class;
 
-  mrb_define_method(mrb, krn, "global_variables", mrb_f_global_variables, MRB_ARGS_NONE()); /* 15.3.1.3.14 (15.3.1.2.4) */
-  mrb_define_method(mrb, krn, "local_variables", mrb_local_variables, MRB_ARGS_NONE()); /* 15.3.1.3.28 (15.3.1.2.7) */
+  mrb_define_method_id(mrb, krn, MRB_SYM(global_variables), mrb_f_global_variables, MRB_ARGS_NONE()); /* 15.3.1.3.14 (15.3.1.2.4) */
+  mrb_define_method_id(mrb, krn, MRB_SYM(local_variables), mrb_local_variables, MRB_ARGS_NONE()); /* 15.3.1.3.28 (15.3.1.2.7) */
 
-  mrb_define_method(mrb, krn, "singleton_class", mrb_singleton_class, MRB_ARGS_NONE());
-  mrb_define_method(mrb, krn, "instance_variable_defined?", mrb_obj_ivar_defined, MRB_ARGS_REQ(1)); /* 15.3.1.3.20 */
-  mrb_define_method(mrb, krn, "instance_variable_get", mrb_obj_ivar_get, MRB_ARGS_REQ(1)); /* 15.3.1.3.21 */
-  mrb_define_method(mrb, krn, "instance_variable_set", mrb_obj_ivar_set, MRB_ARGS_REQ(2)); /* 15.3.1.3.22 */
-  mrb_define_method(mrb, krn, "instance_variables", mrb_obj_instance_variables, MRB_ARGS_NONE()); /* 15.3.1.3.23 */
-  mrb_define_method(mrb, krn, "methods", mrb_obj_methods_m, MRB_ARGS_OPT(1)); /* 15.3.1.3.31 */
-  mrb_define_method(mrb, krn, "private_methods", mrb_obj_private_methods, MRB_ARGS_OPT(1)); /* 15.3.1.3.36 */
-  mrb_define_method(mrb, krn, "protected_methods", mrb_obj_protected_methods, MRB_ARGS_OPT(1)); /* 15.3.1.3.37 */
-  mrb_define_method(mrb, krn, "public_methods", mrb_obj_public_methods, MRB_ARGS_OPT(1)); /* 15.3.1.3.38 */
-  mrb_define_method(mrb, krn, "singleton_methods", mrb_obj_singleton_methods_m, MRB_ARGS_OPT(1)); /* 15.3.1.3.45 */
-  mrb_define_method(mrb, krn, "define_singleton_method", mod_define_singleton_method, MRB_ARGS_REQ(1)|MRB_ARGS_BLOCK());
-  mrb_define_method(mrb, krn, "send", mrb_f_send, MRB_ARGS_REQ(1)|MRB_ARGS_REST()|MRB_ARGS_BLOCK()); /* 15.3.1.3.44 */
+  mrb_define_method_id(mrb, krn, MRB_SYM(singleton_class), mrb_singleton_class, MRB_ARGS_NONE());
+  mrb_define_method_id(mrb, krn, MRB_SYM_Q(instance_variable_defined), mrb_obj_ivar_defined, MRB_ARGS_REQ(1)); /* 15.3.1.3.20 */
+  mrb_define_method_id(mrb, krn, MRB_SYM(instance_variable_get), mrb_obj_ivar_get, MRB_ARGS_REQ(1)); /* 15.3.1.3.21 */
+  mrb_define_method_id(mrb, krn, MRB_SYM(instance_variable_set), mrb_obj_ivar_set, MRB_ARGS_REQ(2)); /* 15.3.1.3.22 */
+  mrb_define_method_id(mrb, krn, MRB_SYM(instance_variables), mrb_obj_instance_variables, MRB_ARGS_NONE()); /* 15.3.1.3.23 */
+  mrb_define_method_id(mrb, krn, MRB_SYM(methods), mrb_obj_methods_m, MRB_ARGS_OPT(1)); /* 15.3.1.3.31 */
+  mrb_define_method_id(mrb, krn, MRB_SYM(private_methods), mrb_obj_private_methods, MRB_ARGS_OPT(1)); /* 15.3.1.3.36 */
+  mrb_define_method_id(mrb, krn, MRB_SYM(protected_methods), mrb_obj_protected_methods, MRB_ARGS_OPT(1)); /* 15.3.1.3.37 */
+  mrb_define_method_id(mrb, krn, MRB_SYM(public_methods), mrb_obj_public_methods, MRB_ARGS_OPT(1)); /* 15.3.1.3.38 */
+  mrb_define_method_id(mrb, krn, MRB_SYM(singleton_methods), mrb_obj_singleton_methods_m, MRB_ARGS_OPT(1)); /* 15.3.1.3.45 */
+  mrb_define_method_id(mrb, krn, MRB_SYM(define_singleton_method), mod_define_singleton_method, MRB_ARGS_REQ(1)|MRB_ARGS_BLOCK());
+  mrb_define_method_id(mrb, krn, MRB_SYM(send), mrb_f_send, MRB_ARGS_REQ(1)|MRB_ARGS_REST()|MRB_ARGS_BLOCK()); /* 15.3.1.3.44 */
 
-  mrb_define_method(mrb, mod, "class_variables", mrb_mod_class_variables, MRB_ARGS_OPT(1)); /* 15.2.2.4.19 */
-  mrb_define_method(mrb, mod, "remove_class_variable", mrb_mod_remove_cvar, MRB_ARGS_REQ(1)); /* 15.2.2.4.39 */
-  mrb_define_method(mrb, mod, "class_variable_defined?", mrb_mod_cvar_defined, MRB_ARGS_REQ(1)); /* 15.2.2.4.16 */
-  mrb_define_method(mrb, mod, "class_variable_get", mrb_mod_cvar_get, MRB_ARGS_REQ(1)); /* 15.2.2.4.17 */
-  mrb_define_method(mrb, mod, "class_variable_set", mrb_mod_cvar_set, MRB_ARGS_REQ(2)); /* 15.2.2.4.18 */
-  mrb_define_method(mrb, mod, "included_modules", mrb_mod_included_modules, MRB_ARGS_NONE()); /* 15.2.2.4.30 */
-  mrb_define_method(mrb, mod, "instance_methods", mrb_mod_instance_methods, MRB_ARGS_ANY()); /* 15.2.2.4.33 */
-  mrb_define_method(mrb, mod, "undefined_instance_methods", mrb_mod_undefined_methods, MRB_ARGS_NONE());
-  mrb_define_method(mrb, mod, "remove_method", mrb_mod_remove_method, MRB_ARGS_ANY()); /* 15.2.2.4.41 */
-  mrb_define_method(mrb, mod, "method_removed", mrb_f_nil, MRB_ARGS_REQ(1));
-  mrb_define_method(mrb, mod, "constants", mrb_mod_constants, MRB_ARGS_OPT(1)); /* 15.2.2.4.24 */
-  mrb_define_class_method(mrb, mod, "constants", mrb_mod_s_constants, MRB_ARGS_ANY()); /* 15.2.2.3.1 */
-  mrb_define_class_method(mrb, mod, "nesting", mrb_mod_s_nesting, MRB_ARGS_NONE()); /* 15.2.2.3.2 */
+  mrb_define_method_id(mrb, mod, MRB_SYM(class_variables), mrb_mod_class_variables, MRB_ARGS_OPT(1)); /* 15.2.2.4.19 */
+  mrb_define_method_id(mrb, mod, MRB_SYM(remove_class_variable), mrb_mod_remove_cvar, MRB_ARGS_REQ(1)); /* 15.2.2.4.39 */
+  mrb_define_method_id(mrb, mod, MRB_SYM_Q(class_variable_defined), mrb_mod_cvar_defined, MRB_ARGS_REQ(1)); /* 15.2.2.4.16 */
+  mrb_define_method_id(mrb, mod, MRB_SYM(class_variable_get), mrb_mod_cvar_get, MRB_ARGS_REQ(1)); /* 15.2.2.4.17 */
+  mrb_define_method_id(mrb, mod, MRB_SYM(class_variable_set), mrb_mod_cvar_set, MRB_ARGS_REQ(2)); /* 15.2.2.4.18 */
+  mrb_define_method_id(mrb, mod, MRB_SYM(included_modules), mrb_mod_included_modules, MRB_ARGS_NONE()); /* 15.2.2.4.30 */
+  mrb_define_method_id(mrb, mod, MRB_SYM(instance_methods), mrb_mod_instance_methods, MRB_ARGS_ANY()); /* 15.2.2.4.33 */
+  mrb_define_method_id(mrb, mod, MRB_SYM(undefined_instance_methods), mrb_mod_undefined_methods, MRB_ARGS_NONE());
+  mrb_define_method_id(mrb, mod, MRB_SYM(remove_method), mrb_mod_remove_method, MRB_ARGS_ANY()); /* 15.2.2.4.41 */
+  mrb_define_method_id(mrb, mod, MRB_SYM(method_removed), mrb_f_nil, MRB_ARGS_REQ(1));
+  mrb_define_method_id(mrb, mod, MRB_SYM(constants), mrb_mod_constants, MRB_ARGS_OPT(1)); /* 15.2.2.4.24 */
+  mrb_define_class_method_id(mrb, mod, MRB_SYM(constants), mrb_mod_s_constants, MRB_ARGS_ANY()); /* 15.2.2.3.1 */
+  mrb_define_class_method_id(mrb, mod, MRB_SYM(nesting), mrb_mod_s_nesting, MRB_ARGS_NONE()); /* 15.2.2.3.2 */
 }
 
 void

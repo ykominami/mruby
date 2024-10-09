@@ -39,7 +39,6 @@ class Hash
   # Returns <code>true</code> if <i>hash</i> and <i>other</i> are
   # both hashes with the same content compared by eql?.
   #
-  # ISO 15.2.13.4.32 (x)
   def eql?(hash)
     return true if self.equal?(hash)
     unless Hash === hash
@@ -167,7 +166,7 @@ class Hash
   #  into a copy of +self+.
   #
   #  Each argument in +other_hashes+ must be a \Hash.
-  #  Adds the contents of _other_hash_ to _hsh_.  If no block is specified,
+  #  Adds the contents of _other_hash_ to _hsh_. If no block is specified,
   #  entries with duplicate keys are overwritten with the values from
   #  _other_hash_, otherwise the value of each duplicate key is determined by
   #  calling the block with the key, its value in _hsh_ and its value in
@@ -182,9 +181,9 @@ class Hash
   #
   # ISO 15.2.13.4.22
   def merge(*others, &block)
-    i=0; len=others.size
     h = self.dup
     return h.__merge(*others) unless block
+    i=0; len=others.size
     while i<len
       other = others[i]
       i += 1
@@ -195,32 +194,6 @@ class Hash
     end
     h
   end
-
-  # internal method for Hash inspection
-  def _inspect(recur_list)
-    return "{}" if self.size == 0
-    return "{...}" if recur_list[self.object_id]
-    recur_list[self.object_id] = true
-    ary=[]
-    keys=self.keys
-    vals=self.values
-    size=keys.size
-    i=0
-    while i<size
-      ary<<(keys[i]._inspect(recur_list) + "=>" + vals[i]._inspect(recur_list))
-      i+=1
-    end
-    "{"+ary.join(", ")+"}"
-  end
-  ##
-  # Return the contents of this hash as a string.
-  #
-  # ISO 15.2.13.4.30 (x)
-  def inspect
-    self._inspect({})
-  end
-  # ISO 15.2.13.4.31 (x)
-  alias to_s inspect
 
   ##
   #  call-seq:

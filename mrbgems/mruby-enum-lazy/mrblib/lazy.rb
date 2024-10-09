@@ -10,6 +10,7 @@ module Enumerable
   #   - select    find_all
   #   - reject
   #   - grep
+  #   - grep_v
   #   - drop
   #   - drop_while
   #   - take_while
@@ -47,9 +48,12 @@ class Enumerator
         raise ArgumentError, "undefined method #{meth}"
       end
       lz = Lazy.new(self, &block)
-      lz.obj = self
-      lz.meth = meth
-      lz.args = args
+      obj = self
+      lz.instance_eval {
+        @obj = obj
+        @meth = meth
+        @args = args
+      }
       lz
     end
     alias enum_for to_enum
@@ -81,6 +85,14 @@ class Enumerator
     def grep(pattern)
       Lazy.new(self){|yielder, val|
         if pattern === val
+          yielder << val
+        end
+      }
+    end
+
+    def grep_v(pattern)
+      Lazy.new(self){|yielder, val|
+        unless pattern === val
           yielder << val
         end
       }

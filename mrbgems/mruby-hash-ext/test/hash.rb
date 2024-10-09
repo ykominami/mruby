@@ -47,7 +47,7 @@ end
 
 assert('Hash#merge!') do
   a = { 'abc_key' => 'abc_value', 'cba_key' => 'cba_value' }
-  b = { 'cba_key' => 'XXX',  'xyz_key' => 'xyz_value' }
+  b = { 'cba_key' => 'XXX', 'xyz_key' => 'xyz_value' }
 
   result_1 = a.merge! b
 
@@ -89,8 +89,8 @@ end
 assert('Hash#compact!') do
   h = { "cat" => "feline", "dog" => nil, "cow" => false }
 
-  h.compact!
-  assert_equal({ "cat" => "feline", "cow" => false }, h)
+  assert_equal({ "cat" => "feline", "cow" => false }, h.compact!)
+  assert_nil(h.compact!)
 end
 
 assert('Hash#fetch') do

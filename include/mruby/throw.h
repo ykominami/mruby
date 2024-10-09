@@ -7,10 +7,8 @@
 #ifndef MRB_THROW_H
 #define MRB_THROW_H
 
-#if defined(MRB_USE_CXX_ABI)
-# if !defined(__cplusplus)
+#if defined(MRB_USE_CXX_ABI) && !defined(__cplusplus)
 #  error Trying to use C++ exception handling in C code
-# endif
 #endif
 
 #if defined(MRB_USE_CXX_EXCEPTION)
@@ -18,11 +16,11 @@
 # if defined(__cplusplus)
 
 #define MRB_TRY(buf) try {
-#define MRB_CATCH(buf) } catch(mrb_jmpbuf_impl e) { if (e != (buf)->impl) { throw e; }
+#define MRB_CATCH(buf) } catch(mrb_jmpbuf *e) { if (e != (buf)) { throw e; }
 #define MRB_END_EXC(buf)  }
 
-#define MRB_THROW(buf) throw((buf)->impl)
-typedef mrb_int mrb_jmpbuf_impl;
+#define MRB_THROW(buf) throw(buf)
+typedef void *mrb_jmpbuf_impl;
 
 # else
 # error "need to be compiled with C++ compiler"
@@ -54,13 +52,6 @@ typedef mrb_int mrb_jmpbuf_impl;
 
 struct mrb_jmpbuf {
   mrb_jmpbuf_impl impl;
-
-#if defined(MRB_USE_CXX_EXCEPTION)
-  static mrb_int jmpbuf_id;
-# if defined(__cplusplus)
-  mrb_jmpbuf() : impl(jmpbuf_id++) {}
-# endif
-#endif
 };
 
 #endif  /* MRB_THROW_H */

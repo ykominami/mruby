@@ -27,13 +27,13 @@
  */
 
 static mrb_value
-mrb_ary_assoc(mrb_state *mrb, mrb_value ary)
+ary_assoc(mrb_state *mrb, mrb_value ary)
 {
   mrb_int i;
   mrb_value v;
   mrb_value k = mrb_get_arg1(mrb);
 
-  for (i = 0; i < RARRAY_LEN(ary); ++i) {
+  for (i = 0; i < RARRAY_LEN(ary); i++) {
     v = mrb_check_array_type(mrb, RARRAY_PTR(ary)[i]);
     if (!mrb_nil_p(v) && RARRAY_LEN(v) > 0 &&
         mrb_equal(mrb, RARRAY_PTR(v)[0], k))
@@ -57,13 +57,13 @@ mrb_ary_assoc(mrb_state *mrb, mrb_value ary)
  */
 
 static mrb_value
-mrb_ary_rassoc(mrb_state *mrb, mrb_value ary)
+ary_rassoc(mrb_state *mrb, mrb_value ary)
 {
   mrb_int i;
   mrb_value v;
   mrb_value value = mrb_get_arg1(mrb);
 
-  for (i = 0; i < RARRAY_LEN(ary); ++i) {
+  for (i = 0; i < RARRAY_LEN(ary); i++) {
     v = RARRAY_PTR(ary)[i];
     if (mrb_array_p(v) &&
         RARRAY_LEN(v) > 1 &&
@@ -87,10 +87,9 @@ mrb_ary_rassoc(mrb_state *mrb, mrb_value ary)
  */
 
 static mrb_value
-mrb_ary_at(mrb_state *mrb, mrb_value ary)
+ary_at(mrb_state *mrb, mrb_value ary)
 {
-  mrb_int pos;
-  mrb_get_args(mrb, "i", &pos);
+  mrb_int pos = mrb_as_int(mrb,  mrb_get_arg1(mrb));
 
   return mrb_ary_entry(ary, pos);
 }
@@ -102,7 +101,7 @@ ary_ref(mrb_state *mrb, mrb_value ary, mrb_int n)
 }
 
 static mrb_value
-mrb_ary_values_at(mrb_state *mrb, mrb_value self)
+ary_values_at(mrb_state *mrb, mrb_value self)
 {
   mrb_int argc = mrb_get_argc(mrb);
   const mrb_value *argv = mrb_get_argv(mrb);
@@ -134,7 +133,7 @@ mrb_value mrb_ary_delete_at(mrb_state *mrb, mrb_value self);
  */
 
 static mrb_value
-mrb_ary_slice_bang(mrb_state *mrb, mrb_value self)
+ary_slice_bang(mrb_state *mrb, mrb_value self)
 {
   struct RArray *a = mrb_ary_ptr(self);
   mrb_int i, j, len, alen;
@@ -167,9 +166,9 @@ mrb_ary_slice_bang(mrb_state *mrb, mrb_value self)
   ptr = ARY_PTR(a) + i;
   ary = mrb_ary_new_from_values(mrb, len, ptr);
 
-  for (j = i; j < alen - len; ++j) {
+  for (j = i; j < alen - len; j++) {
     *ptr = *(ptr+len);
-    ++ptr;
+    ptr++;
   }
 
   mrb_ary_resize(mrb, self, alen - len);
@@ -187,13 +186,13 @@ mrb_ary_slice_bang(mrb_state *mrb, mrb_value self)
  */
 
 static mrb_value
-mrb_ary_compact(mrb_state *mrb, mrb_value self)
+ary_compact(mrb_state *mrb, mrb_value self)
 {
   mrb_value ary = mrb_ary_new(mrb);
   mrb_int len = RARRAY_LEN(self);
   mrb_value *p = RARRAY_PTR(self);
 
-  for (mrb_int i = 0; i < len; ++i) {
+  for (mrb_int i = 0; i < len; i++) {
     if (!mrb_nil_p(p[i])) {
       mrb_ary_push(mrb, ary, p[i]);
     }
@@ -213,22 +212,22 @@ mrb_ary_compact(mrb_state *mrb, mrb_value self)
  *    [ "a", "b", "c" ].compact!           #=> nil
  */
 static mrb_value
-mrb_ary_compact_bang(mrb_state *mrb, mrb_value self)
+ary_compact_bang(mrb_state *mrb, mrb_value self)
 {
   struct RArray *a = mrb_ary_ptr(self);
   mrb_int i, j = 0;
   mrb_int len = ARY_LEN(a);
-  mrb_value *p = ARY_PTR(a);
 
   mrb_ary_modify(mrb, a);
-  for (i = 0; i < len; ++i) {
+  mrb_value *p = ARY_PTR(a);
+  for (i = 0; i < len; i++) {
     if (!mrb_nil_p(p[i])) {
       if (i != j) p[j] = p[i];
       j++;
     }
   }
   if (i == j) return mrb_nil_value();
-  if (j < len) ARY_SET_LEN(RARRAY(self), j);
+  ARY_SET_LEN(RARRAY(self), j);
   return self;
 }
 
@@ -250,7 +249,7 @@ mrb_ary_compact_bang(mrb_state *mrb, mrb_value self)
  *     a.rotate(-3)     #=> ["b", "c", "d", "a"]
  */
 static mrb_value
-mrb_ary_rotate(mrb_state *mrb, mrb_value self)
+ary_rotate(mrb_state *mrb, mrb_value self)
 {
   mrb_int count=1;
   mrb_get_args(mrb, "|i", &count);
@@ -301,17 +300,17 @@ rev(mrb_value *p, mrb_int beg, mrb_int end)
  *     a.rotate!(-3)    #=> ["a", "b", "c", "d"]
  */
 static mrb_value
-mrb_ary_rotate_bang(mrb_state *mrb, mrb_value self)
+ary_rotate_bang(mrb_state *mrb, mrb_value self)
 {
   mrb_int count=1;
   mrb_get_args(mrb, "|i", &count);
 
   struct RArray *a = mrb_ary_ptr(self);
   mrb_int len = ARY_LEN(a);
-  mrb_value *p = ARY_PTR(a);
   mrb_int idx;
 
   mrb_ary_modify(mrb, a);
+  mrb_value *p = ARY_PTR(a);
   if (len == 0 || count == 0) return self;
   if (count == 1) {
     mrb_value v = p[0];
@@ -347,15 +346,15 @@ mrb_mruby_array_ext_gem_init(mrb_state* mrb)
 {
   struct RClass * a = mrb->array_class;
 
-  mrb_define_method(mrb, a, "assoc",  mrb_ary_assoc,  MRB_ARGS_REQ(1));
-  mrb_define_method(mrb, a, "at",     mrb_ary_at,     MRB_ARGS_REQ(1));
-  mrb_define_method(mrb, a, "rassoc", mrb_ary_rassoc, MRB_ARGS_REQ(1));
-  mrb_define_method(mrb, a, "values_at", mrb_ary_values_at, MRB_ARGS_ANY());
-  mrb_define_method(mrb, a, "slice!", mrb_ary_slice_bang, MRB_ARGS_ARG(1,1));
-  mrb_define_method(mrb, a, "compact", mrb_ary_compact, MRB_ARGS_NONE());
-  mrb_define_method(mrb, a, "compact!", mrb_ary_compact_bang, MRB_ARGS_NONE());
-  mrb_define_method(mrb, a, "rotate", mrb_ary_rotate, MRB_ARGS_OPT(1));
-  mrb_define_method(mrb, a, "rotate!", mrb_ary_rotate_bang, MRB_ARGS_OPT(1));
+  mrb_define_method_id(mrb, a, MRB_SYM(assoc), ary_assoc,  MRB_ARGS_REQ(1));
+  mrb_define_method_id(mrb, a, MRB_SYM(at), ary_at,     MRB_ARGS_REQ(1));
+  mrb_define_method_id(mrb, a, MRB_SYM(rassoc), ary_rassoc, MRB_ARGS_REQ(1));
+  mrb_define_method_id(mrb, a, MRB_SYM(values_at), ary_values_at, MRB_ARGS_ANY());
+  mrb_define_method_id(mrb, a, MRB_SYM_B(slice), ary_slice_bang, MRB_ARGS_ARG(1,1));
+  mrb_define_method_id(mrb, a, MRB_SYM(compact), ary_compact, MRB_ARGS_NONE());
+  mrb_define_method_id(mrb, a, MRB_SYM_B(compact), ary_compact_bang, MRB_ARGS_NONE());
+  mrb_define_method_id(mrb, a, MRB_SYM(rotate), ary_rotate, MRB_ARGS_OPT(1));
+  mrb_define_method_id(mrb, a, MRB_SYM_B(rotate), ary_rotate_bang, MRB_ARGS_OPT(1));
 }
 
 void
