@@ -17,7 +17,7 @@ PLATFORMS
 
 DEPENDENCIES
   rake
-  yard (~> 0.9.37)
+  yard (~> 0.9.38)
   yard-coderay
   yard-mruby
 
