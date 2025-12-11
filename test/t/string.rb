@@ -485,16 +485,16 @@ end if UTF8STRING
 
 assert('String#initialize', '15.2.10.5.23') do
   a = ''
-  a.initialize('abc')
+  a.__send__(:initialize,'abc')
   assert_equal 'abc', a
 
-  a.initialize('abcdefghijklmnopqrstuvwxyz')
+  a.__send__(:initialize,'abcdefghijklmnopqrstuvwxyz')
   assert_equal 'abcdefghijklmnopqrstuvwxyz', a
 end
 
 assert('String#initialize_copy', '15.2.10.5.24') do
   a = ''
-  a.initialize_copy('abc')
+  a.__send__(:initialize_copy, 'abc')
 
   assert_equal 'abc', a
 end

@@ -30,13 +30,17 @@ struct REnv {
   mrb_sym mid;
 };
 
-/* flags (21bits): 5(ZERO):8(cioff/bidx):8(stack_len) */
+/* flags (20bits): 1(ZERO):1(separate module):2(visibility):8(cioff/bidx):8(stack_len) */
 #define MRB_ENV_SET_LEN(e,len) ((e)->flags = (((e)->flags & ~0xff)|((unsigned int)(len) & 0xff)))
 #define MRB_ENV_LEN(e) ((mrb_int)((e)->flags & 0xff))
 #define MRB_ENV_CLOSE(e) ((e)->cxt = NULL)
 #define MRB_ENV_ONSTACK_P(e) ((e)->cxt != NULL)
 #define MRB_ENV_BIDX(e) (((e)->flags >> 8) & 0xff)
 #define MRB_ENV_SET_BIDX(e,idx) ((e)->flags = (((e)->flags & ~(0xff<<8))|((unsigned int)(idx) & 0xff)<<8))
+#define MRB_ENV_SET_VISIBILITY(e, vis) MRB_FLAGS_SET((e)->flags, 16, 2, vis)
+#define MRB_ENV_VISIBILITY(e) MRB_FLAGS_GET((e)->flags, 16, 2)
+#define MRB_ENV_VISIBILITY_BREAK_P(e) MRB_FLAG_CHECK((e)->flags, 18)
+#define MRB_ENV_COPY_FLAGS_FROM_CI(e, ci) MRB_FLAGS_SET((e)->flags, 16, 3, (ci)->vis)
 
 /*
  * Returns TRUE on success.
@@ -109,18 +113,26 @@ MRB_API mrb_value mrb_proc_cfunc_env_get(mrb_state *mrb, mrb_int idx);
 /* old name */
 #define mrb_cfunc_env_get(mrb, idx) mrb_proc_cfunc_env_get(mrb, idx)
 
-#define MRB_METHOD_FUNC_FL 1
-#define MRB_METHOD_NOARG_FL 2
+#define MRB_METHOD_FUNC_FL 8
+#define MRB_METHOD_NOARG_FL 4
+#define MRB_METHOD_PUBLIC_FL 0
+#define MRB_METHOD_PRIVATE_FL 1
+#define MRB_METHOD_PROTECTED_FL 2
+#define MRB_METHOD_VDEFAULT_FL 3
+#define MRB_METHOD_VISIBILITY_MASK 3
 
 #define MRB_METHOD_FUNC_P(m) ((m).flags&MRB_METHOD_FUNC_FL)
 #define MRB_METHOD_NOARG_P(m) (((m).flags&MRB_METHOD_NOARG_FL)?1:0)
 #define MRB_METHOD_FUNC(m) ((m).as.func)
 #define MRB_METHOD_NOARG_SET(m) do{(m).flags|=MRB_METHOD_NOARG_FL;}while(0)
 #define MRB_METHOD_FROM_FUNC(m,fn) do{(m).flags=MRB_METHOD_FUNC_FL;(m).as.func=(fn);}while(0)
-#define MRB_METHOD_FROM_PROC(m,pr) do{(m).flags=0;(m).as.proc=(struct RProc*)(pr);}while(0)
+#define MRB_METHOD_FROM_PROC(m,pr) do{(m).flags=0;(m).as.proc=(pr);}while(0)
 #define MRB_METHOD_PROC_P(m) (!MRB_METHOD_FUNC_P(m))
 #define MRB_METHOD_PROC(m) ((m).as.proc)
 #define MRB_METHOD_UNDEF_P(m) ((m).as.proc==NULL)
+#define MRB_METHOD_VISIBILITY(m) ((m).flags & MRB_METHOD_VISIBILITY_MASK)
+#define MRB_SET_VISIBILITY_FLAGS(f,v) ((f)=(((f)&~MRB_METHOD_VISIBILITY_MASK)|(v)))
+#define MRB_METHOD_SET_VISIBILITY(m,v) MRB_SET_VISIBILITY_FLAGS((m).flags,(v))
 
 #define MRB_METHOD_CFUNC_P(m) (MRB_METHOD_FUNC_P(m) || (MRB_METHOD_PROC(m)?(MRB_PROC_CFUNC_P(MRB_METHOD_PROC(m))):FALSE))
 /* use MRB_METHOD_CFUNC(m) only when MRB_METHOD_CFUNC_P(m) is true */

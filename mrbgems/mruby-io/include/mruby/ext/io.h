@@ -6,7 +6,6 @@
 #define MRUBY_IO_H
 
 #include <mruby.h>
-#include <mruby/presym.h>
 
 #ifdef MRB_NO_STDIO
 # error IO and File conflicts 'MRB_NO_STDIO' in your build configuration
@@ -16,11 +15,11 @@
 extern "C" {
 #endif
 
-#if defined(MRB_WITHOUT_IO_PREAD_PWRITE)
-# undef MRB_WITH_IO_PREAD_PWRITE
-#elif !defined(MRB_WITH_IO_PREAD_PWRITE)
-# if defined(__unix__) || defined(__MACH__)
-#  define MRB_WITH_IO_PREAD_PWRITE
+#if defined(MRB_NO_IO_PREAD_PWRITE) || defined(MRB_WITHOUT_IO_PREAD_PWRITE)
+# undef MRB_USE_IO_PREAD_PWRITE
+#elif !defined(MRB_USE_IO_PREAD_PWRITE)
+# if defined(__unix__) || defined(__MACH__) || defined(MRB_WITH_IO_PREAD_PWRITE)
+#  define MRB_USE_IO_PREAD_PWRITE
 # endif
 #endif
 
@@ -66,8 +65,8 @@ struct mrb_io {
 #define MRB_O_DSYNC             0x00008000
 #define MRB_O_RSYNC             0x00010000
 
-#define E_IO_ERROR              mrb_exc_get_id(mrb, MRB_SYM(IOError))
-#define E_EOF_ERROR             mrb_exc_get_id(mrb, MRB_SYM(EOFError))
+#define E_IO_ERROR              mrb_exc_get_id(mrb, MRB_ERROR_SYM(IOError))
+#define E_EOF_ERROR             mrb_exc_get_id(mrb, MRB_ERROR_SYM(EOFError))
 
 int mrb_io_fileno(mrb_state *mrb, mrb_value io);
 

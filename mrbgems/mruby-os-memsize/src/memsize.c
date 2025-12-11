@@ -17,12 +17,12 @@ static size_t
 os_memsize_of_irep(mrb_state* state, const struct mrb_irep *irep)
 {
   size_t size = (irep->slen * sizeof(mrb_sym)) +
-                (irep->plen * sizeof(mrb_pool_value)) +
+                (irep->plen * sizeof(mrb_irep_pool)) +
                 (irep->ilen * sizeof(mrb_code)) +
                 (irep->rlen * sizeof(struct mrb_irep*));
 
   for (int i = 0; i < irep->plen; i++) {
-    const mrb_pool_value *p = &irep->pool[i];
+    const mrb_irep_pool *p = &irep->pool[i];
     if ((p->tt & IREP_TT_NFLAG) == 0) { /* string pool value */
       size += (p->tt>>2);
     }
@@ -156,6 +156,11 @@ os_memsize_of_object(mrb_state* mrb, mrb_value obj)
       size += mrb_objspace_page_slot_size();
 #endif
       break;
+#if defined(MRB_USE_SET)
+    case MRB_TT_SET:
+      size += mrb_set_memsize(obj);
+      break;
+#endif
     case MRB_TT_BIGINT:
 #if defined(MRB_USE_BIGINT)
       size += mrb_bint_memsize(obj);

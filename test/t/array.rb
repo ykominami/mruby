@@ -33,7 +33,7 @@ assert('Array#*', '15.2.12.5.2') do
   assert_equal([1, 1, 1], [1].*(3))
   assert_equal([], [1].*(0))
   assert_equal('abc', ['a', 'b', 'c'].*(''))
-  assert_equal('0, 0, 1, {:foo=>0}', [0, [0, 1], {foo: 0}].*(', '))
+  assert_equal('0, 0, 1, {foo: 0}', [0, [0, 1], {foo: 0}].*(', '))
 end
 
 assert('Array#<<', '15.2.12.5.3') do
@@ -195,10 +195,10 @@ assert("Array#index (block)") do
 end
 
 assert('Array#initialize', '15.2.12.5.15') do
-  a = [].initialize(1)
-  b = [].initialize(2)
-  c = [].initialize(2, 1)
-  d = [].initialize(2) {|i| i}
+  a = [].__send__(:initialize,1)
+  b = [].__send__(:initialize,2)
+  c = [].__send__(:initialize,2, 1)
+  d = [].__send__(:initialize,2) {|i| i}
 
   assert_equal([nil], a)
   assert_equal([nil,nil], b)
@@ -208,7 +208,7 @@ end
 
 assert('Array#initialize_copy', '15.2.12.5.16') do
   a = [1,2,3]
-  b = [].initialize_copy(a)
+  b = [].__send__(:initialize_copy, a)
 
   assert_equal([1,2,3], b)
 end
@@ -467,4 +467,12 @@ assert('Array#delete') do
   a = [nil]
   assert_equal nil, a.delete(nil) { "?" }
   assert_equal [], a
+end
+
+assert('Array#hash with self-referencing arrays') do
+  a = []
+  a << a
+  b = []
+  b << b
+  assert_equal a.hash, b.hash
 end

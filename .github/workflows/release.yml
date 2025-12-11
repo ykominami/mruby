@@ -19,7 +19,7 @@ jobs:
       fail-fast: false
     steps:
       - name: "Checkout ${{ github.ref_name }} ( ${{ github.sha }} )"
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Builds
         id: builds
         run: |
@@ -40,7 +40,7 @@ jobs:
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
-          # draft: true
+          draft: true
           prerelease: ${{ contains(github.ref_name, '-rc') }}
           body_path: NEWS
           files: packages/*

@@ -60,7 +60,11 @@ module MRuby
       def mruby_config_path
         path = ENV['MRUBY_CONFIG'] || ENV['CONFIG']
         if path.nil? || path.empty?
-          path = "#{MRUBY_ROOT}/build_config/default.rb"
+          path = if Dir.pwd != MRUBY_ROOT && File.file?("./build_config.rb")
+            "./build_config.rb"
+          else
+            "#{MRUBY_ROOT}/build_config/default.rb"
+          end
         elsif !File.file?(path) && !Pathname.new(path).absolute?
           f = "#{MRUBY_ROOT}/build_config/#{path}.rb"
           path = File.exist?(f) ? f : File.extname(path).empty? ? f : path
@@ -77,6 +81,7 @@ module MRuby
     include LoadGems
     attr_accessor :name, :bins, :exts, :file_separator, :build_dir, :gem_clone_dir, :defines, :libdir_name
     attr_reader :products, :libmruby_core_objs, :libmruby_objs, :gems, :toolchains, :presym, :mrbc_build, :gem_dir_to_repo_url
+    attr_reader :install_excludes
 
     alias libmruby libmruby_objs
 
@@ -103,6 +108,7 @@ module MRuby
         @gem_clone_dir = "#{build_dir}/repos/#{@name}"
         @libdir_name = (self.kind_of?(MRuby::CrossBuild) ? nil : ENV["MRUBY_SYSTEM_LIBDIR_NAME"]) || "lib"
         @install_prefix = nil
+        @install_excludes = []
         @defines = []
         @cc = Command::Compiler.new(self, %w(.c), label: "CC")
         @cxx = Command::Compiler.new(self, %w(.cc .cxx .cpp), label: "CXX")
@@ -134,6 +140,13 @@ module MRuby
         @internal = internal
         @toolchains = []
         @gem_dir_to_repo_url = {}
+
+        # Add lambda instead of string because libdir_name or lib may be changed by user configuration
+        libmruby_core_name = nil
+        @install_excludes << ->(file) {
+          libmruby_core_name ||= File.join(libdir_name, libfile("libmruby_core"))
+          file == libmruby_core_name
+        }
 
         MRuby.targets[@name] = current = self
       end
@@ -538,7 +551,7 @@ EOS
     attr_writer :presym
 
     def create_mrbc_build
-      exclusions = %i[@name @build_dir @gems @enable_test @enable_bintest @internal]
+      exclusions = %i[@name @build_dir @gems @enable_test @enable_bintest @internal @install_excludes]
       name = "#{@name}/mrbc"
       MRuby.targets.delete(name)
       build = self.class.new(name, internal: true){}
@@ -603,9 +616,6 @@ EOS
       puts ">>> Bintest #{name} <<<"
       targets = @gems.select { |v| File.directory? "#{v.dir}/bintest" }.map { |v| filename v.dir }
       mrbc = @gems["mruby-bin-mrbc"] ? exefile("#{@build_dir}/bin/mrbc") : mrbcfile
-
-      emulator = @test_runner.command
-      emulator = @test_runner.shellquote(emulator) if emulator
 
       env = {
         "BUILD_DIR" => @build_dir,

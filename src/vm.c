@@ -118,6 +118,7 @@ stack_init(mrb_state *mrb)
   /* mrb_assert(mrb->stack == NULL); */
   c->stbase = (mrb_value*)mrb_malloc(mrb, STACK_INIT_SIZE * sizeof(mrb_value));
   c->stend = c->stbase + STACK_INIT_SIZE;
+  stack_clear(c->stbase, STACK_INIT_SIZE);
 
   /* mrb_assert(ci == NULL); */
   static const mrb_callinfo ci_zero = { 0 };
@@ -127,6 +128,7 @@ stack_init(mrb_state *mrb)
   c->ci = c->cibase;
   c->ci->u.target_class = mrb->object_class;
   c->ci->stack = c->stbase;
+  c->ci->vis = MRB_METHOD_PRIVATE_FL;
 }
 
 static inline void
@@ -197,6 +199,16 @@ stack_extend(mrb_state *mrb, mrb_int room)
   }
 }
 
+/**
+ * @brief Extends the VM stack.
+ *
+ * This function extends the virtual machine stack to accommodate more values.
+ * If the current stack size is insufficient, it reallocates the stack
+ * with a larger size.
+ *
+ * @param mrb The mruby state.
+ * @param room The additional number of mrb_value slots required.
+ */
 MRB_API void
 mrb_stack_extend(mrb_state *mrb, mrb_int room)
 {
@@ -233,11 +245,12 @@ uvenv(mrb_state *mrb, mrb_int up)
 }
 
 static inline const struct RProc*
-top_proc(mrb_state *mrb, const struct RProc *proc)
+top_proc(mrb_state *mrb, const struct RProc *proc, const struct REnv **envp)
 {
   while (proc->upper) {
     if (MRB_PROC_SCOPE_P(proc) || MRB_PROC_STRICT_P(proc))
       return proc;
+    *envp = proc->e.env;
     proc = proc->upper;
   }
   return proc;
@@ -254,6 +267,13 @@ mrb_vm_ci_proc_set(mrb_callinfo *ci, const struct RProc *p)
 {
   CI_PROC_SET(ci, p);
 }
+
+#define MRB_PROC_RESOLVE_ALIAS(ci, p) do {\
+  if (MRB_PROC_ALIAS_P(p)) {\
+    (ci)->mid = (p)->body.mid;\
+    (p) = (p)->upper;\
+  }\
+} while (0)
 
 #define CI_TARGET_CLASS(ci) (((ci)->u.env && (ci)->u.env->tt == MRB_TT_ENV)? (ci)->u.env->c : (ci)->u.target_class)
 
@@ -356,6 +376,7 @@ cipush(mrb_state *mrb, mrb_int push_stacks, uint8_t cci, struct RClass *target_c
   ci->n = argc & 0xf;
   ci->nk = (argc>>4) & 0xf;
   ci->cci = cci;
+  ci->vis = MRB_METHOD_PUBLIC_FL;
   ci->u.target_class = target_class;
 
   return ci;
@@ -471,6 +492,26 @@ cipop(mrb_state *mrb)
   return c->ci;
 }
 
+/**
+ * @brief Protects a C function call from mruby exceptions.
+ *
+ * This function executes a C function (`body`) within a protected environment.
+ * If an mruby exception occurs during the execution of `body`, this function
+ * catches the exception, sets the `error` flag, and returns the exception object.
+ * Otherwise, it returns the result of the `body` function and `error` remains FALSE.
+ *
+ * This is crucial for calling mruby-related C functions from within C code
+ * that needs to handle potential mruby exceptions gracefully.
+ *
+ * @param mrb The mruby state.
+ * @param body A pointer to the C function to be executed.
+ *             The function should have the signature: `mrb_value func(mrb_state *mrb, void *userdata)`
+ * @param userdata A pointer to arbitrary data that will be passed to the `body` function.
+ * @param error A pointer to an mrb_bool that will be set to TRUE if an exception
+ *              occurred, and FALSE otherwise. Can be NULL if not needed.
+ * @return The value returned by the `body` function if no exception occurred,
+ *         or the exception object if an exception occurred.
+ */
 MRB_API mrb_value
 mrb_protect_error(mrb_state *mrb, mrb_protect_error_func *body, void *userdata, mrb_bool *error)
 {
@@ -521,6 +562,21 @@ static mrb_value mrb_run(mrb_state *mrb, const struct RProc* proc, mrb_value sel
 #define MRB_FUNCALL_ARGC_MAX 16
 #endif
 
+/**
+ * @brief Calls a method on an object.
+ *
+ * This function invokes a method identified by its name on the `self` object,
+ * passing the given arguments.
+ *
+ * @param mrb The mruby state.
+ * @param self The receiver object of the method call.
+ * @param name The name of the method to call (C string).
+ * @param argc The number of arguments to pass to the method.
+ * @param ... The variable arguments to pass to the method.
+ *            Each argument must be of type `mrb_value`.
+ * @return The result of the method call.
+ * @raise E_ARGUMENT_ERROR if `argc` is greater than `MRB_FUNCALL_ARGC_MAX`.
+ */
 MRB_API mrb_value
 mrb_funcall(mrb_state *mrb, mrb_value self, const char *name, mrb_int argc, ...)
 {
@@ -540,6 +596,23 @@ mrb_funcall(mrb_state *mrb, mrb_value self, const char *name, mrb_int argc, ...)
   return mrb_funcall_argv(mrb, self, mid, argc, argv);
 }
 
+/**
+ * @brief Calls a method on an object using a method ID.
+ *
+ * This function invokes a method identified by its symbol ID (`mid`) on
+ * the `self` object, passing the given arguments. Using a method ID
+ * can be more efficient than using a string name if the method is called
+ * frequently, as it avoids repeated string-to-symbol lookups.
+ *
+ * @param mrb The mruby state.
+ * @param self The receiver object of the method call.
+ * @param mid The symbol ID of the method to call.
+ * @param argc The number of arguments to pass to the method.
+ * @param ... The variable arguments to pass to the method.
+ *            Each argument must be of type `mrb_value`.
+ * @return The result of the method call.
+ * @raise E_ARGUMENT_ERROR if `argc` is greater than `MRB_FUNCALL_ARGC_MAX`.
+ */
 MRB_API mrb_value
 mrb_funcall_id(mrb_state *mrb, mrb_value self, mrb_sym mid, mrb_int argc, ...)
 {
@@ -614,7 +687,7 @@ prepare_missing(mrb_state *mrb, mrb_callinfo *ci, mrb_value recv, mrb_sym mid, m
 
   if (mrb_func_basic_p(mrb, recv, missing, mrb_obj_missing)) {
   method_missing:
-    if (super) mrb_no_method_error(mrb, mid, args, "no superclass method '%n'", mid);
+    if (super) mrb_no_method_error(mrb, mid, args, "no superclass method '%n' for %T", mid, recv);
     else mrb_method_missing(mrb, mid, recv, args);
     /* not reached */
   }
@@ -680,6 +753,24 @@ ensure_block(mrb_state *mrb, mrb_value blk)
   return blk;
 }
 
+/**
+ * @brief Calls a method on an object with a block.
+ *
+ * This function invokes a method identified by its symbol ID (`mid`) on
+ * the `self` object, passing the given arguments (`argv`) and a block (`blk`).
+ *
+ * @param mrb The mruby state.
+ * @param self The receiver object of the method call.
+ * @param mid The symbol ID of the method to call.
+ * @param argc The number of arguments in `argv`.
+ * @param argv A pointer to an array of `mrb_value` arguments.
+ * @param blk The block to pass to the method. If no block is to be passed,
+ *            use `mrb_nil_value()`. If `blk` is not nil and not a proc,
+ *            it will be converted to a proc using `to_proc`.
+ * @return The result of the method call.
+ * @raise E_ARGUMENT_ERROR if `argc` is negative or too large.
+ * @raise E_STACK_ERROR if the call level exceeds `MRB_CALL_LEVEL_MAX`.
+ */
 MRB_API mrb_value
 mrb_funcall_with_block(mrb_state *mrb, mrb_value self, mrb_sym mid, mrb_int argc, const mrb_value *argv, mrb_value blk)
 {
@@ -741,10 +832,7 @@ mrb_funcall_with_block(mrb_state *mrb, mrb_value self, mrb_sym mid, mrb_int argc
     }
     else {
       /* handle alias */
-      if (MRB_PROC_ALIAS_P(ci->proc)) {
-        ci->mid = ci->proc->body.mid;
-        ci->proc = ci->proc->upper;
-      }
+      MRB_PROC_RESOLVE_ALIAS(ci, ci->proc);
       ci->cci = CINFO_SKIP;
       val = mrb_run(mrb, ci->proc, self);
     }
@@ -754,6 +842,23 @@ mrb_funcall_with_block(mrb_state *mrb, mrb_value self, mrb_sym mid, mrb_int argc
   return val;
 }
 
+/**
+ * @brief Calls a method on an object with an array of arguments.
+ *
+ * This function is similar to `mrb_funcall_with_block` but takes arguments
+ * as a C array (`argv`) and does not take an explicit block argument.
+ * If a block is needed, `mrb_funcall_with_block` should be used.
+ * This function is essentially a convenience wrapper around
+ * `mrb_funcall_with_block` with `mrb_nil_value()` for the block.
+ *
+ * @param mrb The mruby state.
+ * @param self The receiver object of the method call.
+ * @param mid The symbol ID of the method to call.
+ * @param argc The number of arguments in `argv`.
+ * @param argv A pointer to an array of `mrb_value` arguments.
+ * @return The result of the method call.
+ * @see mrb_funcall_with_block
+ */
 MRB_API mrb_value
 mrb_funcall_argv(mrb_state *mrb, mrb_value self, mrb_sym mid, mrb_int argc, const mrb_value *argv)
 {
@@ -782,10 +887,7 @@ exec_irep(mrb_state *mrb, mrb_value self, const struct RProc *p)
 
   ci->stack[0] = self;
   /* handle alias */
-  if (MRB_PROC_ALIAS_P(p)) {
-    ci->mid = p->body.mid;
-    p = p->upper;
-  }
+  MRB_PROC_RESOLVE_ALIAS(ci, p);
   CI_PROC_SET(ci, p);
   if (MRB_PROC_CFUNC_P(p)) {
     if (MRB_PROC_NOARG_P(p) && (ci->n > 0 || ci->nk > 0)) {
@@ -809,7 +911,7 @@ exec_irep(mrb_state *mrb, mrb_value self, const struct RProc *p)
 }
 
 mrb_value
-mrb_exec_irep(mrb_state *mrb, mrb_value self, struct RProc *p)
+mrb_exec_irep(mrb_state *mrb, mrb_value self, const struct RProc *p)
 {
   mrb_callinfo *ci = mrb->c->ci;
   if (ci->cci == CINFO_NONE) {
@@ -821,14 +923,15 @@ mrb_exec_irep(mrb_state *mrb, mrb_value self, struct RProc *p)
       if (MRB_PROC_NOARG_P(p) && (ci->n > 0 || ci->nk > 0)) {
         check_method_noarg(mrb, ci);
       }
-      cipush(mrb, 0, CINFO_DIRECT, CI_TARGET_CLASS(ci), p, NULL, ci->mid, ci->n|(ci->nk<<4));
+      ci = cipush(mrb, 0, CINFO_DIRECT, CI_TARGET_CLASS(ci), p, NULL, ci->mid, ci->n|(ci->nk<<4));
       mrb->exc = NULL;
       ret = MRB_PROC_CFUNC(p)(mrb, self);
       cipop(mrb);
     }
     else {
       mrb_int keep = ci_bidx(ci) + 1; /* receiver + block */
-      ret = mrb_top_run(mrb, p, self, keep);
+      ci = cipush(mrb, 0, CINFO_SKIP, CI_TARGET_CLASS(ci), p, NULL, ci->mid, ci->n|(ci->nk<<4));
+      ret = mrb_vm_run(mrb, p, self, keep);
     }
     if (mrb->exc && mrb->jmp) {
       mrb_exc_raise(mrb, mrb_obj_value(mrb->exc));
@@ -837,27 +940,31 @@ mrb_exec_irep(mrb_state *mrb, mrb_value self, struct RProc *p)
   }
 }
 
-/* 15.3.1.3.4  */
-/* 15.3.1.3.44 */
-/*
- *  call-seq:
- *     obj.send(symbol [, args...])        -> obj
- *     obj.__send__(symbol [, args...])      -> obj
- *
- *  Invokes the method identified by _symbol_, passing it any
- *  arguments specified. You can use <code>__send__</code> if the name
- *  +send+ clashes with an existing method in _obj_.
- *
- *     class Klass
- *       def hello(*args)
- *         "Hello " + args.join(' ')
- *       end
- *     end
- *     k = Klass.new
- *     k.send :hello, "gentle", "readers"   #=> "Hello gentle readers"
- */
 mrb_value
-mrb_f_send(mrb_state *mrb, mrb_value self)
+mrb_object_exec(mrb_state *mrb, mrb_value self, struct RClass *target_class)
+{
+  mrb_callinfo *ci = mrb->c->ci;
+  mrb_int bidx = ci_bidx(ci);
+  mrb_value blk = ci->stack[bidx];
+  if (mrb_nil_p(blk)) {
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "no block given");
+  }
+
+  mrb_assert(mrb_proc_p(blk));
+  mrb_gc_protect(mrb, blk);
+  ci->stack[bidx] = mrb_nil_value();
+  mrb_vm_ci_target_class_set(ci, target_class);
+  return mrb_exec_irep(mrb, self, mrb_proc_ptr(blk));
+}
+
+static mrb_noreturn void
+vis_error(mrb_state *mrb, mrb_sym mid, mrb_value args, mrb_value recv, mrb_bool priv)
+{
+  mrb_no_method_error(mrb, mid, args, "%s method '%n' called for %T", (priv ? "private" : "protected"), mid, recv);
+}
+
+static mrb_value
+send_method(mrb_state *mrb, mrb_value self, mrb_bool pub)
 {
   mrb_callinfo *ci = mrb->c->ci;
   int n = ci->n;
@@ -893,6 +1000,22 @@ mrb_f_send(mrb_state *mrb, mrb_value self)
     goto funcall;
   }
 
+  if (pub) {
+    mrb_bool priv = TRUE;
+    if (m.flags & MRB_METHOD_PRIVATE_FL) {
+    vis_err:;
+      if (n == 15) {
+        n = (int)(RARRAY_LEN(regs[0]) - 1);
+        regs = RARRAY_PTR(regs[0]);
+      }
+      vis_error(mrb, name, mrb_ary_new_from_values(mrb, n, regs+1), self, priv);
+    }
+    else if ((m.flags & MRB_METHOD_PROTECTED_FL) && mrb_obj_is_kind_of(mrb, self, ci->u.target_class)) {
+      priv = FALSE;
+      goto vis_err;
+    }
+  }
+
   ci->mid = name;
   ci->u.target_class = c;
   /* remove first symbol from arguments */
@@ -914,10 +1037,7 @@ mrb_f_send(mrb_state *mrb, mrb_value self)
   if (MRB_METHOD_PROC_P(m)) {
     p = MRB_METHOD_PROC(m);
     /* handle alias */
-    if (MRB_PROC_ALIAS_P(p)) {
-      ci->mid = p->body.mid;
-      p = p->upper;
-    }
+    MRB_PROC_RESOLVE_ALIAS(ci, p);
     CI_PROC_SET(ci, p);
   }
   if (MRB_METHOD_CFUNC_P(m)) {
@@ -927,6 +1047,48 @@ mrb_f_send(mrb_state *mrb, mrb_value self)
     return MRB_METHOD_CFUNC(m)(mrb, self);
   }
   return exec_irep(mrb, self, p);
+}
+
+/* 15.3.1.3.4  */
+/* 15.3.1.3.44 */
+/*
+ *  call-seq:
+ *     obj.send(symbol [, args...])        -> obj
+ *     obj.__send__(symbol [, args...])      -> obj
+ *
+ *  Invokes the method identified by _symbol_, passing it any
+ *  arguments specified. You can use `__send__` if the name
+ *  `send` clashes with an existing method in _obj_.
+ *
+ *     class Klass
+ *       def hello(*args)
+ *         "Hello " + args.join(' ')
+ *       end
+ *     end
+ *     k = Klass.new
+ *     k.send :hello, "gentle", "readers"   #=> "Hello gentle readers"
+ */
+mrb_value
+mrb_f_send(mrb_state *mrb, mrb_value self)
+{
+  return send_method(mrb, self, FALSE);
+}
+
+/*
+ *  call-seq:
+ *     obj.public_send(symbol [, args...])  -> obj
+ *
+ * Invokes the method identified by symbol, passing it any
+ * arguments specified. Unlike send, public_send calls public methods only.
+ * When the method is identified by a string, the string is converted to a
+ * symbol.
+ *
+ *  1.public_send(:puts, "hello")  # causes NoMethodError
+ */
+mrb_value
+mrb_f_public_send(mrb_state *mrb, mrb_value self)
+{
+  return send_method(mrb, self, TRUE);
 }
 
 static void
@@ -949,13 +1111,14 @@ eval_under(mrb_state *mrb, mrb_value self, mrb_value blk, struct RClass *c)
     return mrb_yield_with_class(mrb, blk, 1, &self, self, c);
   }
   ci->u.target_class = c;
-  struct RProc *p = mrb_proc_ptr(blk);
+  const struct RProc *p = mrb_proc_ptr(blk);
   /* just in case irep is NULL; #6065 */
   if (p->body.irep == NULL) return mrb_nil_value();
   CI_PROC_SET(ci, p);
   ci->n = 1;
   ci->nk = 0;
   ci->mid = ci[-1].mid;
+  MRB_CI_SET_VISIBILITY_BREAK(ci);
   if (MRB_PROC_CFUNC_P(p)) {
     stack_extend(mrb, 4);
     mrb->c->ci->stack[0] = self;
@@ -981,7 +1144,7 @@ eval_under(mrb_state *mrb, mrb_value self, mrb_value blk, struct RClass *c)
  *     mod.module_eval {| | block } -> obj
  *
  *  Evaluates block in the context of _mod_. This can
- *  be used to add methods to a class. <code>module_eval</code> returns
+ *  be used to add methods to a class. `module_eval` returns
  *  the result of evaluating its argument.
  */
 mrb_value
@@ -1001,10 +1164,10 @@ mrb_mod_module_eval(mrb_state *mrb, mrb_value mod)
  *     obj.instance_eval {| | block }                       -> obj
  *
  *  Evaluates the given block,within  the context of the receiver (_obj_).
- *  In order to set the context, the variable +self+ is set to _obj_ while
+ *  In order to set the context, the variable `self` is set to _obj_ while
  *  the code is executing, giving the code access to _obj_'s
- *  instance variables. In the version of <code>instance_eval</code>
- *  that takes a +String+, the optional second and third
+ *  instance variables. In the version of `instance_eval`
+ *  that takes a `String`, the optional second and third
  *  parameters supply a filename and starting line number that are used
  *  when reporting compilation errors.
  *
@@ -1027,14 +1190,15 @@ mrb_obj_instance_eval(mrb_state *mrb, mrb_value self)
   return eval_under(mrb, self, b, mrb_singleton_class_ptr(mrb, self));
 }
 
-MRB_API mrb_value
-mrb_yield_with_class(mrb_state *mrb, mrb_value b, mrb_int argc, const mrb_value *argv, mrb_value self, struct RClass *c)
+static mrb_value
+yield_with_attr(mrb_state *mrb, mrb_value b, mrb_int argc, const mrb_value *argv, mrb_value self, struct RClass *c,
+                mrb_bool vis_break)
 {
   check_block(mrb, b);
 
   mrb_callinfo *ci = mrb->c->ci;
   mrb_int n = mrb_ci_nregs(ci);
-  struct RProc *p = mrb_proc_ptr(b);
+  const struct RProc *p = mrb_proc_ptr(b);
   mrb_sym mid;
 
   if (MRB_PROC_ENV_P(p)) {
@@ -1047,6 +1211,9 @@ mrb_yield_with_class(mrb_state *mrb, mrb_value b, mrb_int argc, const mrb_value 
   funcall_args_capture(mrb, 0, argc, argv, mrb_nil_value(), ci);
   ci->u.target_class = c;
   ci->proc = p;
+  if (vis_break) {
+    MRB_CI_SET_VISIBILITY_BREAK(ci);
+  }
 
   mrb_value val;
   if (MRB_PROC_CFUNC_P(p)) {
@@ -1065,24 +1232,85 @@ mrb_yield_with_class(mrb_state *mrb, mrb_value b, mrb_int argc, const mrb_value 
   return val;
 }
 
+/**
+ * @brief Yields to a block with a specific `self` object and class context.
+ *
+ * This function executes a given block (`b`) with the provided arguments (`argv`).
+ * The `self` object within the block will be `self`, and the class context
+ * will be `c`. This allows for more control over the execution environment of
+ * the block. The `vis_break` flag is set to TRUE, meaning visibility checks
+ * (public/private/protected) are enforced.
+ *
+ * @param mrb The mruby state.
+ * @param b The block (proc) to yield to.
+ * @param argc The number of arguments in `argv`.
+ * @param argv A pointer to an array of `mrb_value` arguments to pass to the block.
+ * @param self The object that will be `self` inside the block.
+ * @param c The class context for the block execution.
+ * @return The result of the block execution.
+ * @raise E_TYPE_ERROR if `b` is not a proc or nil.
+ * @see mrb_yield_argv
+ * @see mrb_yield
+ */
+MRB_API mrb_value
+mrb_yield_with_class(mrb_state *mrb, mrb_value b, mrb_int argc, const mrb_value *argv, mrb_value self, struct RClass *c)
+{
+  return yield_with_attr(mrb, b, argc, argv, self, c, TRUE);
+}
+
+/**
+ * @brief Yields to a block with an array of arguments.
+ *
+ * This function executes a given block (`b`) with the provided arguments (`argv`).
+ * The `self` object and class context for the block execution are determined
+ * from the block itself (its captured environment).
+ * Visibility checks (public/private/protected) are not strictly enforced
+ * in the same way as `mrb_yield_with_class` (vis_break is FALSE).
+ *
+ * @param mrb The mruby state.
+ * @param b The block (proc) to yield to.
+ * @param argc The number of arguments in `argv`.
+ * @param argv A pointer to an array of `mrb_value` arguments to pass to the block.
+ * @return The result of the block execution.
+ * @raise E_TYPE_ERROR if `b` is not a proc or nil.
+ * @see mrb_yield_with_class
+ * @see mrb_yield
+ */
 MRB_API mrb_value
 mrb_yield_argv(mrb_state *mrb, mrb_value b, mrb_int argc, const mrb_value *argv)
 {
-  struct RProc *p = mrb_proc_ptr(b);
+  const struct RProc *p = mrb_proc_ptr(b);
   struct RClass *tc;
   mrb_value self = mrb_proc_get_self(mrb, p, &tc);
 
-  return mrb_yield_with_class(mrb, b, argc, argv, self, tc);
+  return yield_with_attr(mrb, b, argc, argv, self, tc, FALSE);
 }
 
+/**
+ * @brief Yields to a block with a single argument.
+ *
+ * This function executes a given block (`b`) with a single argument (`arg`).
+ * It's a convenience function for the common case of yielding with one argument.
+ * The `self` object and class context for the block execution are determined
+ * from the block itself.
+ * Visibility checks are not strictly enforced (vis_break is FALSE).
+ *
+ * @param mrb The mruby state.
+ * @param b The block (proc) to yield to.
+ * @param arg The single `mrb_value` argument to pass to the block.
+ * @return The result of the block execution.
+ * @raise E_TYPE_ERROR if `b` is not a proc or nil.
+ * @see mrb_yield_with_class
+ * @see mrb_yield_argv
+ */
 MRB_API mrb_value
 mrb_yield(mrb_state *mrb, mrb_value b, mrb_value arg)
 {
-  struct RProc *p = mrb_proc_ptr(b);
+  const struct RProc *p = mrb_proc_ptr(b);
   struct RClass *tc;
   mrb_value self = mrb_proc_get_self(mrb, p, &tc);
 
-  return mrb_yield_with_class(mrb, b, 1, &arg, self, tc);
+  return yield_with_attr(mrb, b, 1, &arg, self, tc, FALSE);
 }
 
 mrb_value
@@ -1090,7 +1318,7 @@ mrb_yield_cont(mrb_state *mrb, mrb_value b, mrb_value self, mrb_int argc, const 
 {
   check_block(mrb, b);
 
-  struct RProc *p = mrb_proc_ptr(b);
+  const struct RProc *p = mrb_proc_ptr(b);
   mrb_callinfo *ci = mrb->c->ci;
 
   stack_extend_adjust(mrb, 4, &argv);
@@ -1287,23 +1515,64 @@ prepare_tagged_break(mrb_state *mrb, uint32_t tag, const mrb_callinfo *return_ci
 
 #ifdef MRB_USE_VM_SWITCH_DISPATCH
 
-#define INIT_DISPATCH for (;;) { insn = BYTECODE_DECODER(*ci->pc); CODE_FETCH_HOOK(mrb, irep, ci->pc, regs); switch (insn) {
-#define CASE(insn,ops) case insn: { const mrb_code *pc = ci->pc+1; FETCH_ ## ops (); ci->pc = pc; } L_ ## insn ## _BODY:
+#define INIT_DISPATCH for (;;) { CALL_CODE_HOOKS(); switch (insn) {
+#define CASE(insn,ops) case insn: DECODE_OPERANDS(ops); L_ ## insn ## _BODY:
 #define NEXT goto L_END_DISPATCH
 #define JUMP NEXT
-#define END_DISPATCH L_END_DISPATCH:;}}
+#define END_DISPATCH L_END_DISPATCH: RETURN_IF_TASK_STOPPED(mrb);}}
 
 #else
 
 #define INIT_DISPATCH JUMP; return mrb_nil_value();
-#define CASE(insn,ops) L_ ## insn: { const mrb_code *pc = ci->pc+1; FETCH_ ## ops (); ci->pc = pc; } L_ ## insn ## _BODY:
-#define NEXT insn=BYTECODE_DECODER(*ci->pc); CODE_FETCH_HOOK(mrb, irep, ci->pc, regs); goto *optable[insn]
+#define CASE(insn,ops) L_ ## insn: DECODE_OPERANDS(ops); L_ ## insn ## _BODY:
+#define NEXT RETURN_IF_TASK_STOPPED(mrb); CALL_CODE_HOOKS(); goto *optable[insn]
 #define JUMP NEXT
-
-#define END_DISPATCH
+#define END_DISPATCH RETURN_IF_TASK_STOPPED(mrb)
 
 #endif
 
+#define DECODE_OPERANDS(ops) do { const mrb_code *pc = ci->pc+1; FETCH_ ## ops (); ci->pc = pc; } while (0)
+#define CALL_CODE_HOOKS() do { insn = BYTECODE_DECODER(*ci->pc); CODE_FETCH_HOOK(mrb, irep, ci->pc, regs); } while (0)
+
+#ifdef MRB_USE_TASK_SCHEDULER
+#define RETURN_IF_TASK_STOPPED(mrb) do { \
+  if ((mrb)->task.switching || (mrb)->c->status == MRB_TASK_STOPPED) \
+    return mrb_nil_value(); \
+} while (0)
+#define TASK_STOP(mrb) do { \
+  if (mrb->c->status != MRB_TASK_STOPPED) \
+    mrb->c->status = MRB_TASK_STOPPED; \
+} while (0)
+#else
+#define RETURN_IF_TASK_STOPPED(mrb)
+#define TASK_STOP(mrb)
+#endif
+
+/**
+ * @brief Executes a mruby bytecode sequence (iseq) within the VM.
+ *
+ * This function is a core part of the mruby execution process. It sets up
+ * the VM environment for executing the bytecode instructions associated with
+ * the given proc (Ruby procedure/method).
+ *
+ * It initializes the stack if necessary, extends it to accommodate the
+ * required number of registers for the proc, and then calls `mrb_vm_exec`
+ * to actually execute the bytecode.
+ *
+ * @param mrb The mruby state.
+ * @param proc The RProc object containing the bytecode (iseq) to execute.
+ *             This proc represents a Ruby method or block.
+ * @param self The `self` object for the context of this execution.
+ * @param stack_keep The number of values to preserve on the stack from the
+ *                   previous context. This is used for managing nested calls
+ *                   and ensuring that arguments or local variables from the
+ *                   caller are accessible if needed, or that the stack is
+ *                   correctly cleared.
+ * @return The result of the bytecode execution (typically the value of the
+ *         last evaluated expression).
+ * @see mrb_vm_exec
+ * @see mrb_top_run
+ */
 MRB_API mrb_value
 mrb_vm_run(mrb_state *mrb, const struct RProc *proc, mrb_value self, mrb_int stack_keep)
 {
@@ -1354,6 +1623,7 @@ hash_new_from_regs(mrb_state *mrb, mrb_int argc, mrb_int idx)
   mrb_callinfo *ci = mrb->c->ci;
   while (argc--) {
     mrb_hash_set(mrb, hash, regs[idx+0], regs[idx+1]);
+    ci = mrb->c->ci;
     idx += 2;
   }
   return hash;
@@ -1361,6 +1631,33 @@ hash_new_from_regs(mrb_state *mrb, mrb_int argc, mrb_int idx)
 
 #define ary_new_from_regs(mrb, argc, idx) mrb_ary_new_from_values(mrb, (argc), &regs[idx]);
 
+/**
+ * @brief Executes a sequence of mruby bytecode instructions.
+ *
+ * This is the main bytecode interpreter loop. It takes a starting proc
+ * (`begin_proc`) and a pointer to the initial instruction (`iseq`) within
+ * that proc's instruction sequence. It then enters a loop, fetching and
+ * dispatching bytecode operations until an OP_STOP instruction is encountered,
+ * an exception occurs, or a C function call returns.
+ *
+ * This function handles the low-level details of instruction decoding,
+ * stack manipulation, exception handling (try/catch blocks within mruby code),
+ * and calling C functions or other mruby methods.
+ *
+ * @param mrb The mruby state.
+ * @param begin_proc The initial RProc whose bytecode is to be executed.
+ *                   While the name suggests it's the "beginning" proc,
+ *                   execution might involve other procs called from this one.
+ * @param iseq A pointer to the first bytecode instruction to execute within
+ *             `begin_proc`'s instruction sequence.
+ * @return The result of the execution. This could be the return value of
+ *         the executed Ruby code, an exception object if an unhandled
+ *         exception occurred, or the result of a fiber switch.
+ * @note This function is highly complex and central to mruby's operation.
+ *       It uses a jump table (`optable`) for efficient instruction dispatch
+ *       when not using switch-based dispatch. It also manages the callinfo
+ *       stack (`ci`) for tracking method/block calls.
+ */
 MRB_API mrb_value
 mrb_vm_exec(mrb_state *mrb, const struct RProc *begin_proc, const mrb_code *iseq)
 {
@@ -1400,7 +1697,21 @@ RETRY_TRY_BLOCK:
       goto L_BREAK;
     goto L_RAISE;
   }
+  /* Intentionally store stack variable address for exception handling.
+   * This is safe because the pointer is cleared before function returns.
+   * Suppress GCC 12+ warning about dangling pointer. */
+#if defined(__GNUC__) && !defined(__clang__)
+  #if __GNUC__ >= 12
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wdangling-pointer"
+  #endif
+#endif
   mrb->jmp = &c_jmp;
+#if defined(__GNUC__) && !defined(__clang__)
+  #if __GNUC__ >= 12
+    #pragma GCC diagnostic pop
+  #endif
+#endif
 
   INIT_DISPATCH {
     CASE(OP_NOP, Z) {
@@ -1435,7 +1746,7 @@ RETRY_TRY_BLOCK:
 #ifdef MRB_USE_BIGINT
         {
           const char *s = irep->pool[b].u.str;
-          regs[a] = mrb_bint_new_str(mrb, s+2, (uint8_t)s[0], s[1]);
+          regs[a] = mrb_bint_new_str(mrb, s+2, (uint8_t)s[0], (int8_t)s[1]);
         }
         break;
 #else
@@ -1454,7 +1765,7 @@ RETRY_TRY_BLOCK:
       NEXT;
     }
 
-    CASE(OP_LOADI, BB) {
+    CASE(OP_LOADI8, BB) {
       SET_FIXNUM_VALUE(regs[a], b);
       NEXT;
     }
@@ -1582,6 +1893,7 @@ RETRY_TRY_BLOCK:
         break;
       case MRB_TT_HASH:
         va = mrb_hash_get(mrb, va, vb);
+        ci = mrb->c->ci;
         regs[a] = va;
         break;
       case MRB_TT_STRING:
@@ -1619,8 +1931,10 @@ RETRY_TRY_BLOCK:
     }
 
     CASE(OP_SETCONST, BB) {
-      mrb_vm_const_set(mrb, irep->syms[b], regs[a]);
       ci = mrb->c->ci;
+      struct RClass *c = MRB_PROC_TARGET_CLASS(ci->proc);
+      if (!c) c = mrb->object_class;
+      mrb_const_set(mrb, mrb_obj_value(c), irep->syms[b], regs[a]);
       NEXT;
     }
 
@@ -1700,7 +2014,7 @@ RETRY_TRY_BLOCK:
         if (irep->clen > 0 &&
             (ch = catch_handler_find(irep, ci->pc, MRB_CATCH_FILTER_ENSURE))) {
           /* avoiding a jump from a catch handler into the same handler */
-          if (a < mrb_irep_catch_handler_unpack(ch->begin) || a >= mrb_irep_catch_handler_unpack(ch->end)) {
+          if (a < mrb_irep_catch_handler_unpack(ch->begin) || a > mrb_irep_catch_handler_unpack(ch->end)) {
             THROW_TAGGED_BREAK(mrb, RBREAK_TAG_JUMP, mrb->c->ci, mrb_fixnum_value(a));
           }
         }
@@ -1813,7 +2127,6 @@ RETRY_TRY_BLOCK:
 
     CASE(OP_SSEND, BBB) {
       regs[a] = regs[0];
-      insn = OP_SEND;
     }
     goto L_SENDB;
 
@@ -1856,6 +2169,7 @@ RETRY_TRY_BLOCK:
         else if (nk > 0) {  /* pack keyword arguments */
           mrb_int kidx = a+(n==CALL_MAXARGS?1:n)+1;
           mrb_value kdict = hash_new_from_regs(mrb, nk, kidx);
+          ci = mrb->c->ci;
           regs[kidx] = kdict;
           nk = CALL_MAXARGS;
           c = n | (nk<<4);
@@ -1864,7 +2178,7 @@ RETRY_TRY_BLOCK:
       }
 
       mrb_assert(bidx < irep->nregs);
-      if (insn == OP_SEND) {
+      if (insn == OP_SEND || insn == OP_SSEND) {
         /* clear block argument */
         SET_NIL_VALUE(regs[new_bidx]);
         SET_NIL_VALUE(blk);
@@ -1885,15 +2199,24 @@ RETRY_TRY_BLOCK:
       else {
         ci->mid = mid;
       }
+      if (insn == OP_SEND || insn == OP_SENDB) {
+        mrb_bool priv = TRUE;
+        if (m.flags & MRB_METHOD_PRIVATE_FL) {
+        vis_err:;
+          mrb_value args = (ci->n == 15) ? regs[1] : mrb_ary_new_from_values(mrb, ci->n, regs+1);
+          vis_error(mrb, mid, args, recv, priv);
+        }
+        else if ((m.flags & MRB_METHOD_PROTECTED_FL) && mrb_obj_is_kind_of(mrb, recv, ci->u.target_class)) {
+          priv = FALSE;
+          goto vis_err;
+        }
+      }
       ci->cci = CINFO_NONE;
 
       if (MRB_METHOD_PROC_P(m)) {
         const struct RProc *p = MRB_METHOD_PROC(m);
         /* handle alias */
-        if (MRB_PROC_ALIAS_P(p)) {
-          ci->mid = p->body.mid;
-          p = p->upper;
-        }
+        MRB_PROC_RESOLVE_ALIAS(ci, p);
         CI_PROC_SET(ci, p);
         if (!MRB_PROC_CFUNC_P(p)) {
           /* setup environment for calling method */
@@ -1942,11 +2265,8 @@ RETRY_TRY_BLOCK:
       const struct RProc *p = mrb_proc_ptr(recv);
 
       /* handle alias */
-      if (MRB_PROC_ALIAS_P(p)) {
-        ci->mid = p->body.mid;
-        p = p->upper;
-      }
-      else if (MRB_PROC_ENV_P(p)) {
+      MRB_PROC_RESOLVE_ALIAS(ci, p);
+      if (MRB_PROC_ENV_P(p)) {
         ci->mid = MRB_PROC_ENV(p)->mid;
       }
       /* replace callinfo */
@@ -2102,7 +2422,7 @@ RETRY_TRY_BLOCK:
         kdict = regs[mrb_ci_kidx(ci)];
       }
       if (!kd) {
-        if (!mrb_nil_p(kdict) && mrb_hash_size(mrb, kdict) > 0) {
+        if (!mrb_nil_p(kdict) && mrb_hash_p(kdict) && mrb_hash_size(mrb, kdict) > 0) {
           if (argc < 14) {
             ci->n++;
             argc++;    /* include kdict in normal arguments */
@@ -2228,8 +2548,10 @@ RETRY_TRY_BLOCK:
         RAISE_FORMAT(mrb, E_ARGUMENT_ERROR, "missing keyword: %v", k);
       }
       v = mrb_hash_get(mrb, kdict, k);
+      ci = mrb->c->ci;
       regs[a] = v;
       mrb_hash_delete_key(mrb, kdict, k);
+      ci = mrb->c->ci;
       NEXT;
     }
 
@@ -2241,6 +2563,7 @@ RETRY_TRY_BLOCK:
 
       if (kidx >= 0 && mrb_hash_p(kdict=regs[kidx])) {
         key_p = mrb_hash_key_p(mrb, kdict, k);
+        ci = mrb->c->ci;
       }
       regs[a] = mrb_bool_value(key_p);
       NEXT;
@@ -2251,8 +2574,7 @@ RETRY_TRY_BLOCK:
       mrb_value kdict;
 
       if (kidx >= 0 && mrb_hash_p(kdict=regs[kidx]) && !mrb_hash_empty_p(mrb, kdict)) {
-        mrb_value keys = mrb_hash_keys(mrb, kdict);
-        mrb_value key1 = RARRAY_PTR(keys)[0];
+        mrb_value key1 = mrb_hash_first_key(mrb, kdict);
         RAISE_FORMAT(mrb, E_ARGUMENT_ERROR, "unknown keyword: %v", key1);
       }
       NEXT;
@@ -2276,11 +2598,12 @@ RETRY_TRY_BLOCK:
         goto NORMAL_RETURN;
       }
 
-      const struct RProc *dst = top_proc(mrb, ci->proc);
+      const struct REnv *env = ci->u.env;
+      const struct RProc *dst = top_proc(mrb, ci->proc, &env);
       if (!MRB_PROC_ENV_P(dst) || dst->e.env->cxt == mrb->c) {
         /* check jump destination */
         for (ptrdiff_t i = ci - mrb->c->cibase; i >= 0; i--, ci--) {
-          if (ci->proc == dst) {
+          if (ci->u.env == env) {
             goto L_UNWINDING;
           }
         }
@@ -2649,6 +2972,7 @@ RETRY_TRY_BLOCK:
 
     CASE(OP_ARYCAT, B) {
       mrb_value splat = mrb_ary_splat(mrb, regs[a+1]);
+      ci = mrb->c->ci;
       if (mrb_nil_p(regs[a])) {
         regs[a] = splat;
       }
@@ -2670,6 +2994,7 @@ RETRY_TRY_BLOCK:
 
     CASE(OP_ARYSPLAT, B) {
       mrb_value ary = mrb_ary_splat(mrb, regs[a]);
+      ci = mrb->c->ci;
       regs[a] = ary;
       mrb_gc_arena_restore(mrb, ai);
       NEXT;
@@ -2703,14 +3028,12 @@ RETRY_TRY_BLOCK:
       mrb_value v = regs[a];
       int pre  = b;
       int post = c;
-      struct RArray *ary;
-      int len, idx;
 
       if (!mrb_array_p(v)) {
         v = ary_new_from_regs(mrb, 1, a);
       }
-      ary = mrb_ary_ptr(v);
-      len = (int)ARY_LEN(ary);
+      struct RArray *ary = mrb_ary_ptr(v);
+      int len = (int)ARY_LEN(ary);
       if (len > pre + post) {
         v = mrb_ary_new_from_values(mrb, len - pre - post, ARY_PTR(ary)+pre);
         regs[a++] = v;
@@ -2721,6 +3044,8 @@ RETRY_TRY_BLOCK:
       else {
         v = mrb_ary_new_capa(mrb, 0);
         regs[a++] = v;
+
+        int idx;
         for (idx=0; idx+pre<len; idx++) {
           regs[a+idx] = ARY_PTR(ary)[pre+idx];
         }
@@ -2774,6 +3099,7 @@ RETRY_TRY_BLOCK:
     CASE(OP_STRCAT, B) {
       mrb_assert(mrb_string_p(regs[a]));
       mrb_str_concat(mrb, regs[a], regs[a+1]);
+      ci = mrb->c->ci;
       NEXT;
     }
 
@@ -2783,6 +3109,7 @@ RETRY_TRY_BLOCK:
 
       for (int i=a; i<lim; i+=2) {
         mrb_hash_set(mrb, hash, regs[i], regs[i+1]);
+        ci = mrb->c->ci;
       }
       regs[a] = hash;
       mrb_gc_arena_restore(mrb, ai);
@@ -2797,6 +3124,7 @@ RETRY_TRY_BLOCK:
       mrb_ensure_hash_type(mrb, hash);
       for (int i=a+1; i<lim; i+=2) {
         mrb_hash_set(mrb, hash, regs[i], regs[i+1]);
+        ci = mrb->c->ci;
       }
       mrb_gc_arena_restore(mrb, ai);
       NEXT;
@@ -2806,6 +3134,7 @@ RETRY_TRY_BLOCK:
 
       mrb_assert(mrb_hash_p(hash));
       mrb_hash_merge(mrb, hash, regs[a+1]);
+      ci = mrb->c->ci;
       mrb_gc_arena_restore(mrb, ai);
       NEXT;
     }
@@ -2839,13 +3168,16 @@ RETRY_TRY_BLOCK:
     }
 
     CASE(OP_RANGE_INC, B) {
-      regs[a] = mrb_range_new(mrb, regs[a], regs[a+1], FALSE);
+      mrb_value v = mrb_range_new(mrb, regs[a], regs[a+1], FALSE);
+      ci = mrb->c->ci;
+      regs[a] = v;
       mrb_gc_arena_restore(mrb, ai);
       NEXT;
     }
 
     CASE(OP_RANGE_EXC, B) {
       mrb_value v = mrb_range_new(mrb, regs[a], regs[a+1], TRUE);
+      ci = mrb->c->ci;
       regs[a] = v;
       mrb_gc_arena_restore(mrb, ai);
       NEXT;
@@ -2916,11 +3248,12 @@ RETRY_TRY_BLOCK:
 
     CASE(OP_DEF, BB) {
       struct RClass *target = mrb_class_ptr(regs[a]);
-      struct RProc *p = mrb_proc_ptr(regs[a+1]);
+      const struct RProc *p = mrb_proc_ptr(regs[a+1]);
       mrb_method_t m;
       mrb_sym mid = irep->syms[b];
 
       MRB_METHOD_FROM_PROC(m, p);
+      MRB_METHOD_SET_VISIBILITY(m, MRB_METHOD_VDEFAULT_FL);
       mrb_define_method_raw(mrb, target, mid, m);
       mrb_method_added(mrb, target, mid);
       ci = mrb->c->ci;
@@ -3031,9 +3364,11 @@ RETRY_TRY_BLOCK:
       mrb->jmp = prev_jmp;
       if (!mrb_nil_p(v)) {
         mrb->exc = mrb_obj_ptr(v);
+        TASK_STOP(mrb);
         return v;
       }
       mrb->exc = NULL;
+      TASK_STOP(mrb);
       return regs[irep->nlocals];
     }
   }
@@ -3058,6 +3393,27 @@ mrb_run(mrb_state *mrb, const struct RProc *proc, mrb_value self)
   return mrb_vm_run(mrb, proc, self, ci_bidx(mrb->c->ci) + 1);
 }
 
+/**
+ * @brief Executes a mruby proc in the top-level environment.
+ *
+ * This function is used to execute a proc (like a script loaded from a file
+ * or a string) at the top level of the mruby environment. It's similar to
+ * `mrb_vm_run` but is specifically designed for top-level execution.
+ *
+ * It ensures that if there's an existing callinfo stack, the new execution
+ * is pushed on top with `CINFO_SKIP`, indicating it's a new, distinct
+ * execution context rather than a nested call from within the VM.
+ *
+ * @param mrb The mruby state.
+ * @param proc The RProc object (representing the script or code) to execute.
+ * @param self The `self` object for this top-level execution. Typically,
+ *             this is the main `top_self` object in mruby.
+ * @param stack_keep The number of values to preserve on the stack. For
+ *                   top-level execution, this is often 0 or a small number
+ *                   to set up initial local variables if any.
+ * @return The result of the proc's execution.
+ * @see mrb_vm_run
+ */
 MRB_API mrb_value
 mrb_top_run(mrb_state *mrb, const struct RProc *proc, mrb_value self, mrb_int stack_keep)
 {

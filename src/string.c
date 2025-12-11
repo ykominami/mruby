@@ -61,7 +61,7 @@ str_init_normal_capa(mrb_state *mrb, struct RString *s,
   s->as.heap.ptr = dst;
   s->as.heap.len = len;
   s->as.heap.aux.capa = capa;
-  RSTR_UNSET_TYPE_FLAG(s);
+  RSTR_SET_TYPE(s, NORMAL);
   return s;
 }
 
@@ -77,7 +77,7 @@ str_init_embed(struct RString *s, const char *p, mrb_int len)
   mrb_assert(len >= 0);
   if (p) memcpy(RSTR_EMBED_PTR(s), p, len);
   RSTR_EMBED_PTR(s)[len] = '\0';
-  RSTR_SET_TYPE_FLAG(s, EMBED);
+  RSTR_SET_TYPE(s, EMBED);
   RSTR_SET_EMBED_LEN(s, len);
   return s;
 }
@@ -88,7 +88,7 @@ str_init_nofree(struct RString *s, const char *p, mrb_int len)
   s->as.heap.ptr = (char*)p;
   s->as.heap.len = len;
   s->as.heap.aux.capa = 0;             /* nofree */
-  RSTR_SET_TYPE_FLAG(s, NOFREE);
+  RSTR_SET_TYPE(s, NOFREE);
   return s;
 }
 
@@ -107,7 +107,7 @@ str_init_shared(mrb_state *mrb, const struct RString *orig, struct RString *s, m
   s->as.heap.ptr = orig->as.heap.ptr;
   s->as.heap.len = orig->as.heap.len;
   s->as.heap.aux.shared = shared;
-  RSTR_SET_TYPE_FLAG(s, SHARED);
+  RSTR_SET_TYPE(s, SHARED);
   return s;
 }
 
@@ -117,7 +117,7 @@ str_init_fshared(const struct RString *orig, struct RString *s, struct RString *
   s->as.heap.ptr = orig->as.heap.ptr;
   s->as.heap.len = orig->as.heap.len;
   s->as.heap.aux.fshared = fshared;
-  RSTR_SET_TYPE_FLAG(s, FSHARED);
+  RSTR_SET_TYPE(s, FSHARED);
   return s;
 }
 
@@ -152,6 +152,14 @@ str_new(mrb_state *mrb, const char *p, mrb_int len)
   return str_init_normal(mrb, mrb_obj_alloc_string(mrb), p, len);
 }
 
+/*
+ * @param mrb The mruby state.
+ * @param capa The desired capacity of the new string.
+ * @return A new mruby string with the specified capacity.
+ *
+ * Creates a new mruby string with a given initial capacity.
+ * The string is initially empty.
+ */
 MRB_API mrb_value
 mrb_str_new_capa(mrb_state *mrb, mrb_int capa)
 {
@@ -181,12 +189,29 @@ resize_capa(mrb_state *mrb, struct RString *s, mrb_int capacity)
   }
 }
 
+/*
+ * @param mrb The mruby state.
+ * @param p A pointer to the C string to copy.
+ * @param len The length of the C string.
+ * @return A new mruby string containing the copied C string.
+ *
+ * Creates a new mruby string from a C string and a specified length.
+ * If `p` is NULL, an empty string is created.
+ */
 MRB_API mrb_value
 mrb_str_new(mrb_state *mrb, const char *p, mrb_int len)
 {
   return mrb_obj_value(str_new(mrb, p, len));
 }
 
+/*
+ * @param mrb The mruby state.
+ * @param p A pointer to the null-terminated C string to copy.
+ * @return A new mruby string containing the copied C string.
+ *
+ * Creates a new mruby string from a null-terminated C string.
+ * If `p` is NULL, an empty string is created.
+ */
 MRB_API mrb_value
 mrb_str_new_cstr(mrb_state *mrb, const char *p)
 {
@@ -205,6 +230,16 @@ mrb_str_new_cstr(mrb_state *mrb, const char *p)
   return mrb_obj_value(s);
 }
 
+/*
+ * @param mrb The mruby state.
+ * @param p A pointer to the static C string.
+ * @param len The length of the static C string.
+ * @return A new mruby string referencing the static C string.
+ *
+ * Creates a new mruby string that directly references a static C string.
+ * The C string is not copied and must remain valid for the lifetime of the mruby string.
+ * This is typically used for string literals.
+ */
 MRB_API mrb_value
 mrb_str_new_static(mrb_state *mrb, const char *p, mrb_int len)
 {
@@ -223,7 +258,7 @@ str_decref(mrb_state *mrb, mrb_shared_string *shared)
 }
 
 static void
-str_modify_keep_ascii(mrb_state *mrb, struct RString *s)
+str_unshare_buffer(mrb_state *mrb, struct RString *s)
 {
   if (RSTR_SHARED_P(s)) {
     mrb_shared_string *shared = s->as.heap.aux.shared;
@@ -231,7 +266,7 @@ str_modify_keep_ascii(mrb_state *mrb, struct RString *s)
     if (shared->refcnt == 1 && s->as.heap.ptr == shared->ptr) {
       s->as.heap.aux.capa = shared->capa;
       s->as.heap.ptr[s->as.heap.len] = '\0';
-      RSTR_UNSET_SHARED_FLAG(s);
+      RSTR_SET_TYPE(s, NORMAL);
       mrb_free(mrb, shared);
     }
     else {
@@ -407,12 +442,13 @@ mrb_utf8len(const char* p, const char* e)
 # define popcount(x) __builtin_popcountl(x)
 # endif
 #else
+#define POPC_SHIFT (8 * sizeof(bitint) - 8)
 static inline uint32_t popcount(bitint x)
 {
   x = (x & (MASK01*0x55)) + ((x >>  1) & (MASK01*0x55));
   x = (x & (MASK01*0x33)) + ((x >>  2) & (MASK01*0x33));
   x = (x & (MASK01*0x0F)) + ((x >>  4) & (MASK01*0x0F));
-  return (x * MASK01) >> 56;
+  return (uint32_t)((x * MASK01) >> POPC_SHIFT);
 }
 #endif
 
@@ -458,15 +494,17 @@ utf8_strlen(mrb_value str)
 
 /* map character index to byte offset index */
 static mrb_int
-chars2bytes(mrb_value s, mrb_int off, mrb_int idx)
+chars2bytes(mrb_value str, mrb_int off, mrb_int idx)
 {
-  if (RSTR_SINGLE_BYTE_P(mrb_str_ptr(s))) {
+  struct RString *s = mrb_str_ptr(str);
+  if (RSTR_SINGLE_BYTE_P(s) || RSTR_BINARY_P(s)) {
     return idx;
   }
 
-  const char *p0 = RSTRING_PTR(s) + off;
+  const char *o = RSTR_PTR(s);
+  const char *p0 = o + off;
   const char *p = p0;
-  const char *e = RSTRING_END(s);
+  const char *e = o + RSTR_LEN(s);
   mrb_int i = 0;
 
   while (p<e && i<idx) {
@@ -495,14 +533,15 @@ chars2bytes(mrb_value s, mrb_int off, mrb_int idx)
 
 /* map byte offset to character index */
 static mrb_int
-bytes2chars(mrb_value s, mrb_int bi)
+bytes2chars(mrb_value str, mrb_int bi)
 {
-  if (RSTR_SINGLE_BYTE_P(mrb_str_ptr(s))) {
+  struct RString *s = mrb_str_ptr(str);
+  if (RSTR_SINGLE_BYTE_P(s) || RSTR_BINARY_P(s)) {
     return bi;
   }
 
-  const char *p = RSTRING_PTR(s);
-  const char *e = p + RSTRING_LEN(s);
+  const char *p = RSTR_PTR(s);
+  const char *e = p + RSTR_LEN(s);
   const char *pivot = p + bi;
   mrb_int i = 0;
 
@@ -523,7 +562,7 @@ bytes2chars(mrb_value s, mrb_int bi)
 }
 
 static const char*
-char_adjust(const char *beg, const char *end, const char *ptr)
+char_adjust(const char *ptr, const char *end)
 {
   ptrdiff_t len = end - ptr;
   if (len < 1 || utf8_islead(ptr[0])) return ptr;
@@ -566,7 +605,7 @@ str_index_str_by_char(mrb_state *mrb, mrb_value str, mrb_value sub, mrb_int pos)
 #define RSTRING_CHAR_LEN(s) RSTRING_LEN(s)
 #define chars2bytes(s, off, ci) (ci)
 #define bytes2chars(s, bi) (bi)
-#define char_adjust(beg, end, ptr) (ptr)
+#define char_adjust(ptr, end) (ptr)
 #define char_backtrack(ptr, end) ((end) - 1)
 #define str_index_str_by_char(mrb, str, sub, pos) str_index_str((mrb), (str), (sub), (pos))
 #endif
@@ -690,6 +729,17 @@ str_share(mrb_state *mrb, struct RString *orig, struct RString *s)
   }
 }
 
+/*
+ * @param mrb The mruby state.
+ * @param str The original mruby string.
+ * @param beg The starting byte offset of the substring.
+ * @param len The length in bytes of the substring.
+ * @return A new mruby string representing the byte subsequence.
+ *
+ * Creates a new mruby string that is a subsequence of an existing string,
+ * based on byte offsets and length. This function may share the underlying
+ * buffer with the original string if possible.
+ */
 mrb_value
 mrb_str_byte_subseq(mrb_state *mrb, mrb_value str, mrb_int beg, mrb_int len)
 {
@@ -743,6 +793,17 @@ str_substr(mrb_state *mrb, mrb_value str, mrb_int beg, mrb_int len)
     str_subseq(mrb, str, beg, len) : mrb_nil_value();
 }
 
+/*
+ * @param mrb The mruby state.
+ * @param str The mruby string to search in.
+ * @param sptr A pointer to the C string to search for.
+ * @param slen The length of the C string to search for.
+ * @param offset The byte offset at which to start the search.
+ * @return The byte offset of the first occurrence of the substring, or -1 if not found.
+ *
+ * Finds the first occurrence of a C string within an mruby string, starting from a given offset.
+ * The search is performed on a byte-by-byte basis.
+ */
 MRB_API mrb_int
 mrb_str_index(mrb_state *mrb, mrb_value str, const char *sptr, mrb_int slen, mrb_int offset)
 {
@@ -818,7 +879,7 @@ str_rindex(mrb_state *mrb, mrb_value str, mrb_value sub, mrb_int pos)
   s = sbeg + pos;
   t = RSTRING_PTR(sub);
   if (len) {
-    s = char_adjust(sbeg, send, s);
+    s = char_adjust(s, send);
     while (sbeg <= s) {
       if ((mrb_int)(send - s) >= len && memcmp(s, t, len) == 0) {
         return (mrb_int)(s - sbeg);
@@ -897,13 +958,31 @@ mrb_locale_from_utf8(const char *utf8, int len)
 }
 #endif
 
+/*
+ * @param mrb The mruby state.
+ * @param s The RString structure to modify.
+ *
+ * Prepares a string for modification. If the string is shared or not extensible,
+ * it will be unshared or converted to a normal string. This version preserves
+ * the ASCII/single-byte nature of the string if it was already set.
+ * Raises an error if the string is frozen.
+ */
 MRB_API void
 mrb_str_modify_keep_ascii(mrb_state *mrb, struct RString *s)
 {
   mrb_check_frozen(mrb, s);
-  str_modify_keep_ascii(mrb, s);
+  str_unshare_buffer(mrb, s);
 }
 
+/*
+ * @param mrb The mruby state.
+ * @param s The RString structure to modify.
+ *
+ * Prepares a string for modification. Similar to `mrb_str_modify_keep_ascii`,
+ * but also unsets the single-byte flag, assuming the modification might
+ * introduce multi-byte characters.
+ * Raises an error if the string is frozen.
+ */
 MRB_API void
 mrb_str_modify(mrb_state *mrb, struct RString *s)
 {
@@ -911,15 +990,26 @@ mrb_str_modify(mrb_state *mrb, struct RString *s)
   RSTR_UNSET_SINGLE_BYTE_FLAG(s);
 }
 
+/*
+ * @param mrb The mruby state.
+ * @param str The mruby string to resize.
+ * @param len The new desired length of the string.
+ * @return The resized mruby string.
+ *
+ * Resizes an mruby string to a new length.
+ * If the new length is shorter, the string is truncated.
+ * If the new length is longer, the string is extended, and the new portion's
+ * content is undefined (it might be null bytes or garbage).
+ * The string is modified in place.
+ */
 MRB_API mrb_value
 mrb_str_resize(mrb_state *mrb, mrb_value str, mrb_int len)
 {
-  mrb_int slen;
   struct RString *s = mrb_str_ptr(str);
 
   str_check_length(mrb, len);
   mrb_str_modify(mrb, s);
-  slen = RSTR_LEN(s);
+  mrb_int slen = RSTR_LEN(s);
   if (len != slen) {
     if (slen < len || slen - len > 256) {
       resize_capa(mrb, s, len);
@@ -930,6 +1020,21 @@ mrb_str_resize(mrb_state *mrb, mrb_value str, mrb_int len)
   return str;
 }
 
+/*
+ * @param mrb The mruby state.
+ * @param str0 The mruby string to convert.
+ * @return A pointer to a null-terminated C string.
+ *
+ * Converts an mruby string to a null-terminated C string.
+ * This function may allocate a new C string if the mruby string
+ * contains null bytes or is not already null-terminated.
+ * The caller is responsible for managing the memory of the returned C string
+ * if it's different from the string's internal buffer.
+ * Raises E_ARGUMENT_ERROR if the string contains a null byte.
+ * Note: This function creates a *new* RString object to hold the C-string version if modification is needed.
+ * It's generally recommended to use RSTRING_PTR and RSTRING_LEN for direct access
+ * and ensure null termination manually if needed, or use mrb_string_cstr for a (potentially new) null-terminated string.
+ */
 MRB_API char*
 mrb_str_to_cstr(mrb_state *mrb, mrb_value str0)
 {
@@ -942,6 +1047,14 @@ mrb_str_to_cstr(mrb_state *mrb, mrb_value str0)
   return RSTR_PTR(s);
 }
 
+/*
+ * @param mrb The mruby state.
+ * @param self The mruby string to append to (modified in place).
+ * @param other The mruby value to append (will be converted to a string).
+ *
+ * Concatenates the string representation of `other` to `self`.
+ * `self` is modified in place.
+ */
 MRB_API void
 mrb_str_concat(mrb_state *mrb, mrb_value self, mrb_value other)
 {
@@ -949,6 +1062,14 @@ mrb_str_concat(mrb_state *mrb, mrb_value self, mrb_value other)
   mrb_str_cat_str(mrb, self, other);
 }
 
+/*
+ * @param mrb The mruby state.
+ * @param a The first mruby string.
+ * @param b The second mruby string.
+ * @return A new mruby string that is the concatenation of `a` and `b`.
+ *
+ * Creates a new mruby string by concatenating two existing mruby strings.
+ */
 MRB_API mrb_value
 mrb_str_plus(mrb_state *mrb, mrb_value a, mrb_value b)
 {
@@ -974,8 +1095,8 @@ mrb_str_plus(mrb_state *mrb, mrb_value a, mrb_value b)
  *  call-seq:
  *     str + other_str   -> new_str
  *
- *  Concatenation---Returns a new <code>String</code> containing
- *  <i>other_str</i> concatenated to <i>str</i>.
+ *  Concatenation---Returns a new `String` containing
+ *  `other_str` concatenated to `str`.
  *
  *     "Hello from " + self.to_s   #=> "Hello from main"
  */
@@ -1014,7 +1135,7 @@ mrb_str_bytesize(mrb_state *mrb, mrb_value self)
  *  call-seq:
  *     str * integer   => new_str
  *
- *  Copy---Returns a new <code>String</code> containing <i>integer</i> copies of
+ *  Copy---Returns a new `String` containing `integer` copies of
  *  the receiver.
  *
  *     "Ho! " * 3   #=> "Ho! Ho! Ho! "
@@ -1060,6 +1181,16 @@ mrb_str_times(mrb_state *mrb, mrb_value self)
  *                     =  0
  *                     <  -1
  */
+/*
+ * @param mrb The mruby state.
+ * @param str1 The first mruby string for comparison.
+ * @param str2 The second mruby string for comparison (must be a string).
+ * @return An integer less than, equal to, or greater than zero if `str1` is less than,
+ *         equal to, or greater than `str2`, respectively.
+ *
+ * Compares two mruby strings lexicographically.
+ * Assumes `str2` is already a string. For a version that checks and converts, see `mrb_str_cmp_m`.
+ */
 MRB_API int
 mrb_str_cmp(mrb_state *mrb, mrb_value str1, mrb_value str2)
 {
@@ -1069,7 +1200,8 @@ mrb_str_cmp(mrb_state *mrb, mrb_value str1, mrb_value str2)
   mrb_int len1 = RSTR_LEN(s1);
   mrb_int len2 = RSTR_LEN(s2);
   mrb_int len = lesser(len1, len2);
-  mrb_int retval = memcmp(RSTR_PTR(s1), RSTR_PTR(s2), len);
+  mrb_int retval = (len == 0) ? 0 : memcmp(RSTR_PTR(s1), RSTR_PTR(s2), len);
+
   if (retval == 0) {
     if (len1 == len2) return 0;
     if (len1 > len2)  return 1;
@@ -1085,20 +1217,19 @@ mrb_str_cmp(mrb_state *mrb, mrb_value str1, mrb_value str2)
  *  call-seq:
  *     str <=> other_str   => -1, 0, +1
  *
- *  Comparison---Returns -1 if <i>other_str</i> is less than, 0 if
- *  <i>other_str</i> is equal to, and +1 if <i>other_str</i> is greater than
- *  <i>str</i>. If the strings are of different lengths, and the strings are
+ *  Comparison---Returns -1 if `other_str` is less than, 0 if
+ *  `other_str` is equal to, and +1 if `other_str` is greater than
+ *  `str`. If the strings are of different lengths, and the strings are
  *  equal when compared up to the shortest length, then the longer string is
- *  considered greater than the shorter one. If the variable <code>$=</code> is
- *  <code>false</code>, the comparison is based on comparing the binary values
+ *  considered greater than the shorter one. If the variable `$=` is
+ *  `false`, the comparison is based on comparing the binary values
  *  of each character in the string. In older versions of Ruby, setting
- *  <code>$=</code> allowed case-insensitive comparisons; this is now deprecated
- *  in favor of using <code>String#casecmp</code>.
+ *  `$=` allowed case-insensitive comparisons; this is now deprecated
+ *  in favor of using `String#casecmp`.
  *
- *  <code><=></code> is the basis for the methods <code><</code>,
- *  <code><=</code>, <code>></code>, <code>>=</code>, and <code>between?</code>,
- *  included from module <code>Comparable</code>.  The method
- *  <code>String#==</code> does not use <code>Comparable#==</code>.
+ *  `<=>` is the basis for the methods `<`, `<=`, `>`, `>=`, and `between?`,
+ *  included from module `Comparable`.  The method `String#==` does not use
+ *  `Comparable#==`.
  *
  *     "abcdef" <=> "abcde"     #=> 1
  *     "abcdef" <=> "abcdef"    #=> 0
@@ -1127,6 +1258,15 @@ str_eql(mrb_state *mrb, const mrb_value str1, const mrb_value str2)
   return (memcmp(RSTRING_PTR(str1), RSTRING_PTR(str2), (size_t)len) == 0);
 }
 
+/*
+ * @param mrb The mruby state.
+ * @param str1 The first mruby string.
+ * @param str2 The second mruby value to compare with.
+ * @return `TRUE` if `str1` and `str2` are equal strings, `FALSE` otherwise.
+ *
+ * Checks if two mruby strings are equal.
+ * Returns `FALSE` if `str2` is not a string.
+ */
 MRB_API mrb_bool
 mrb_str_equal(mrb_state *mrb, mrb_value str1, mrb_value str2)
 {
@@ -1140,10 +1280,10 @@ mrb_str_equal(mrb_state *mrb, mrb_value str1, mrb_value str2)
  *     str == obj   => true or false
  *
  *  Equality---
- *  If <i>obj</i> is not a <code>String</code>, returns <code>false</code>.
- *  Otherwise, returns <code>false</code> or <code>true</code>
+ *  If `obj` is not a `String`, returns `false`.
+ *  Otherwise, returns `false` or `true`
  *
- *   caution:if <i>str</i> <code><=></code> <i>obj</i> returns zero.
+ *   caution:if `str` `<=>` `obj` returns zero.
  */
 static mrb_value
 mrb_str_equal_m(mrb_state *mrb, mrb_value str1)
@@ -1154,6 +1294,14 @@ mrb_str_equal_m(mrb_state *mrb, mrb_value str1)
 }
 /* ---------------------------------- */
 
+/*
+ * @param mrb The mruby state.
+ * @param str The mruby string to duplicate.
+ * @return A new mruby string that is a copy of the original.
+ *
+ * Creates a new mruby string that is a duplicate of the given string.
+ * The new string will have its own buffer.
+ */
 MRB_API mrb_value
 mrb_str_dup(mrb_state *mrb, mrb_value str)
 {
@@ -1178,32 +1326,32 @@ enum str_convert_range {
 };
 
 static enum str_convert_range
-str_convert_range(mrb_state *mrb, mrb_value str, mrb_value indx, mrb_value alen, mrb_int *beg, mrb_int *len)
+str_convert_range(mrb_state *mrb, mrb_value str, mrb_value idx, mrb_value alen, mrb_int *beg, mrb_int *len)
 {
   if (!mrb_undef_p(alen)) {
-    *beg = mrb_as_int(mrb, indx);
+    *beg = mrb_as_int(mrb, idx);
     *len = mrb_as_int(mrb, alen);
     return STR_CHAR_RANGE;
   }
   else {
-    switch (mrb_type(indx)) {
+    switch (mrb_type(idx)) {
       default:
-        indx = mrb_ensure_int_type(mrb, indx);
+        idx = mrb_ensure_int_type(mrb, idx);
         /* fall through */
       case MRB_TT_INTEGER:
-        *beg = mrb_integer(indx);
+        *beg = mrb_integer(idx);
         *len = 1;
         return STR_CHAR_RANGE;
 
       case MRB_TT_STRING:
-        *beg = str_index_str(mrb, str, indx, 0);
+        *beg = str_index_str(mrb, str, idx, 0);
         if (*beg < 0) { break; }
-        *len = RSTRING_LEN(indx);
+        *len = RSTRING_LEN(idx);
         return STR_BYTE_RANGE_CORRECTED;
 
       case MRB_TT_RANGE:
         *len = RSTRING_CHAR_LEN(str);
-        switch (mrb_range_beg_len(mrb, indx, beg, len, *len, TRUE)) {
+        switch (mrb_range_beg_len(mrb, idx, beg, len, *len, TRUE)) {
           case MRB_RANGE_OK:
             return STR_CHAR_RANGE_CORRECTED;
           case MRB_RANGE_OUT:
@@ -1216,12 +1364,25 @@ str_convert_range(mrb_state *mrb, mrb_value str, mrb_value indx, mrb_value alen,
   return STR_OUT_OF_RANGE;
 }
 
+/*
+ * @param mrb The mruby state.
+ * @param str The mruby string.
+ * @param idx The index or range. Can be an integer, a string, or a range.
+ * @param alen An optional length (if `idx` is an integer).
+ * @return A new mruby string (substring), or nil if out of bounds or not found.
+ *
+ * Implements string element reference (e.g., `str[idx]`, `str[idx, len]`).
+ * - If `idx` is an Integer, returns a substring of 1 character at that index (or `len` characters if `alen` is provided).
+ * - If `idx` is a String, returns that string if it's a substring of `str`.
+ * - If `idx` is a Range, returns the substring specified by the range.
+ * Character indexing is used if UTF-8 is enabled, otherwise byte indexing.
+ */
 mrb_value
-mrb_str_aref(mrb_state *mrb, mrb_value str, mrb_value indx, mrb_value alen)
+mrb_str_aref(mrb_state *mrb, mrb_value str, mrb_value idx, mrb_value alen)
 {
   mrb_int beg, len;
 
-  switch (str_convert_range(mrb, str, indx, alen, &beg, &len)) {
+  switch (str_convert_range(mrb, str, idx, alen, &beg, &len)) {
     case STR_CHAR_RANGE_CORRECTED:
       return str_subseq(mrb, str, beg, len);
     case STR_CHAR_RANGE:
@@ -1229,8 +1390,8 @@ mrb_str_aref(mrb_state *mrb, mrb_value str, mrb_value indx, mrb_value alen)
       if (mrb_undef_p(alen) && !mrb_nil_p(str) && RSTRING_LEN(str) == 0) return mrb_nil_value();
       return str;
     case STR_BYTE_RANGE_CORRECTED:
-      if (mrb_string_p(indx)) {
-        return mrb_str_dup(mrb, indx);
+      if (mrb_string_p(idx)) {
+        return mrb_str_dup(mrb, idx);
       }
       else {
         return mrb_str_byte_subseq(mrb, str, beg, len);
@@ -1254,17 +1415,17 @@ mrb_str_aref(mrb_state *mrb, mrb_value str, mrb_value indx, mrb_value alen)
  *     str.slice(range)         => new_str or nil
  *     str.slice(other_str)     => new_str or nil
  *
- *  Element Reference---If passed a single <code>Integer</code>, returns the code
- *  of the character at that position. If passed two <code>Integer</code>
+ *  Element Reference---If passed a single `Integer`, returns the code
+ *  of the character at that position. If passed two `Integer`
  *  objects, returns a substring starting at the offset given by the first, and
  *  a length given by the second. If given a range, a substring containing
  *  characters at offsets given by the range is returned. In all three cases, if
- *  an offset is negative, it is counted from the end of <i>str</i>. Returns
- *  <code>nil</code> if the initial offset falls outside the string, the length
+ *  an offset is negative, it is counted from the end of *str*. Returns
+ *  `nil` if the initial offset falls outside the string, the length
  *  is negative, or the beginning of the range is greater than the end.
  *
- *  If a <code>String</code> is given, that string is returned if it occurs in
- *  <i>str</i>. In both cases, <code>nil</code> is returned if there is no
+ *  If a `String` is given, that string is returned if it occurs in
+ *  *str*. In both cases, `nil` is returned if there is no
  *  match.
  *
  *     a = "hello there"
@@ -1414,12 +1575,12 @@ str_escape(mrb_state *mrb, mrb_value str, mrb_bool inspect)
 }
 
 static void
-mrb_str_aset(mrb_state *mrb, mrb_value str, mrb_value indx, mrb_value alen, mrb_value replace)
+mrb_str_aset(mrb_state *mrb, mrb_value str, mrb_value idx, mrb_value alen, mrb_value replace)
 {
   mrb_int beg, len, charlen;
 
   mrb_ensure_string_type(mrb, replace);
-  switch (str_convert_range(mrb, str, indx, alen, &beg, &len)) {
+  switch (str_convert_range(mrb, str, idx, alen, &beg, &len)) {
     case STR_OUT_OF_RANGE:
     default:
       mrb_raise(mrb, E_INDEX_ERROR, "string not matched");
@@ -1429,7 +1590,7 @@ mrb_str_aset(mrb_state *mrb, mrb_value str, mrb_value indx, mrb_value alen, mrb_
       }
       charlen = RSTRING_CHAR_LEN(str);
       if (beg < 0) { beg += charlen; }
-      if (beg < 0 || beg > charlen) { str_out_of_index(mrb, indx); }
+      if (beg < 0 || beg > charlen) { str_out_of_index(mrb, idx); }
       /* fall through */
     case STR_CHAR_RANGE_CORRECTED:
       beg = chars2bytes(str, 0, beg);
@@ -1450,16 +1611,16 @@ mrb_str_aset(mrb_state *mrb, mrb_value str, mrb_value indx, mrb_value alen, mrb_
  *    str[range] = replace
  *    str[other_str] = replace
  *
- * Modify +self+ by replacing the content of +self+.
+ * Modify `self` by replacing the content of `self`.
  * The portion of the string affected is determined using the same criteria as +String#[]+.
- * The return value of this expression is +replace+.
+ * The return value of this expression is `replace`.
  */
 static mrb_value
 mrb_str_aset_m(mrb_state *mrb, mrb_value str)
 {
-  mrb_value indx, alen, replace;
+  mrb_value idx, alen, replace;
 
-  switch (mrb_get_args(mrb, "oo|S!", &indx, &alen, &replace)) {
+  switch (mrb_get_args(mrb, "oo|S!", &idx, &alen, &replace)) {
     case 2:
       replace = alen;
       alen = mrb_undef_value();
@@ -1467,7 +1628,7 @@ mrb_str_aset_m(mrb_state *mrb, mrb_value str)
     case 3:
       break;
   }
-  mrb_str_aset(mrb, str, indx, alen, replace);
+  mrb_str_aset(mrb, str, idx, alen, replace);
   return replace;
 }
 
@@ -1476,8 +1637,8 @@ mrb_str_aset_m(mrb_state *mrb, mrb_value str)
  *  call-seq:
  *     str.capitalize!   => str or nil
  *
- *  Modifies <i>str</i> by converting the first character to uppercase and the
- *  remainder to lowercase. Returns <code>nil</code> if no changes are made.
+ *  Modifies *str* by converting the first character to uppercase and the
+ *  remainder to lowercase. Returns `nil` if no changes are made.
  *
  *     a = "hello"
  *     a.capitalize!   #=> "Hello"
@@ -1514,7 +1675,7 @@ mrb_str_capitalize_bang(mrb_state *mrb, mrb_value str)
  *  call-seq:
  *     str.capitalize   => new_str
  *
- *  Returns a copy of <i>str</i> with the first character converted to uppercase
+ *  Returns a copy of *str* with the first character converted to uppercase
  *  and the remainder to lowercase.
  *
  *     "hello".capitalize    #=> "Hello"
@@ -1524,9 +1685,7 @@ mrb_str_capitalize_bang(mrb_state *mrb, mrb_value str)
 static mrb_value
 mrb_str_capitalize(mrb_state *mrb, mrb_value self)
 {
-  mrb_value str;
-
-  str = mrb_str_dup(mrb, self);
+  mrb_value str = mrb_str_dup(mrb, self);
   mrb_str_capitalize_bang(mrb, str);
   return str;
 }
@@ -1536,23 +1695,18 @@ mrb_str_capitalize(mrb_state *mrb, mrb_value self)
  *  call-seq:
  *     str.chomp!(separator="\n")   => str or nil
  *
- *  Modifies <i>str</i> in place as described for <code>String#chomp</code>,
- *  returning <i>str</i>, or <code>nil</code> if no modifications were made.
+ *  Modifies *str* in place as described for `String#chomp`,
+ *  returning *str*, or `nil` if no modifications were made.
  */
 static mrb_value
 mrb_str_chomp_bang(mrb_state *mrb, mrb_value str)
 {
   mrb_value rs;
-  mrb_int newline;
-  char *p, *pp;
-  mrb_int rslen;
-  mrb_int len;
-  mrb_int argc;
+  mrb_int argc = mrb_get_args(mrb, "|S", &rs);
   struct RString *s = mrb_str_ptr(str);
 
-  argc = mrb_get_args(mrb, "|S", &rs);
   mrb_str_modify_keep_ascii(mrb, s);
-  len = RSTR_LEN(s);
+  mrb_int len = RSTR_LEN(s);
   if (argc == 0) {
     if (len == 0) return mrb_nil_value();
   smart_chomp:
@@ -1574,8 +1728,8 @@ mrb_str_chomp_bang(mrb_state *mrb, mrb_value str)
   }
 
   if (len == 0 || mrb_nil_p(rs)) return mrb_nil_value();
-  p = RSTR_PTR(s);
-  rslen = RSTRING_LEN(rs);
+  char *p = RSTR_PTR(s);
+  mrb_int rslen = RSTRING_LEN(rs);
   if (rslen == 0) {
     while (len>0 && p[len-1] == '\n') {
       len--;
@@ -1590,13 +1744,13 @@ mrb_str_chomp_bang(mrb_state *mrb, mrb_value str)
     return mrb_nil_value();
   }
   if (rslen > len) return mrb_nil_value();
-  newline = RSTRING_PTR(rs)[rslen-1];
+  mrb_int newline = RSTRING_PTR(rs)[rslen-1];
   if (rslen == 1 && newline == '\n')
     newline = RSTRING_PTR(rs)[rslen-1];
   if (rslen == 1 && newline == '\n')
     goto smart_chomp;
 
-  pp = p + len - rslen;
+  char *pp = p + len - rslen;
   if (p[len-1] == newline &&
      (rslen <= 1 ||
      memcmp(RSTRING_PTR(rs), pp, rslen) == 0)) {
@@ -1612,10 +1766,10 @@ mrb_str_chomp_bang(mrb_state *mrb, mrb_value str)
  *  call-seq:
  *     str.chomp(separator="\n")   => new_str
  *
- *  Returns a new <code>String</code> with the given record separator removed
- *  from the end of <i>str</i> (if present). <code>chomp</code> also removes
- *  carriage return characters (that is it will remove <code>\n</code>,
- *  <code>\r</code>, and <code>\r\n</code>).
+ *  Returns a new `String` with the given record separator removed
+ *  from the end of *str* (if present). `chomp` also removes
+ *  carriage return characters (that is it will remove `\n`,
+ *  `\r`, and `\r\n`).
  *
  *     "hello".chomp            #=> "hello"
  *     "hello\n".chomp          #=> "hello"
@@ -1628,9 +1782,7 @@ mrb_str_chomp_bang(mrb_state *mrb, mrb_value str)
 static mrb_value
 mrb_str_chomp(mrb_state *mrb, mrb_value self)
 {
-  mrb_value str;
-
-  str = mrb_str_dup(mrb, self);
+  mrb_value str = mrb_str_dup(mrb, self);
   mrb_str_chomp_bang(mrb, str);
   return str;
 }
@@ -1640,9 +1792,9 @@ mrb_str_chomp(mrb_state *mrb, mrb_value self)
  *  call-seq:
  *     str.chop!   => str or nil
  *
- *  Processes <i>str</i> as for <code>String#chop</code>, returning <i>str</i>,
- *  or <code>nil</code> if <i>str</i> is the empty string.  See also
- *  <code>String#chomp!</code>.
+ *  Processes *str* as for `String#chop`, returning *str*,
+ *  or `nil` if *str* is the empty string.  See also
+ *  `String#chomp!`.
  */
 static mrb_value
 mrb_str_chop_bang(mrb_state *mrb, mrb_value str)
@@ -1682,10 +1834,10 @@ mrb_str_chop_bang(mrb_state *mrb, mrb_value str)
  *  call-seq:
  *     str.chop   => new_str
  *
- *  Returns a new <code>String</code> with the last character removed.  If the
- *  string ends with <code>\r\n</code>, both characters are removed. Applying
- *  <code>chop</code> to an empty string returns an empty
- *  string. <code>String#chomp</code> is often a safer alternative, as it leaves
+ *  Returns a new `String` with the last character removed.  If the
+ *  string ends with `\r\n`, both characters are removed. Applying
+ *  `chop` to an empty string returns an empty
+ *  string. `String#chomp` is often a safer alternative, as it leaves
  *  the string unchanged if it doesn't end in a record separator.
  *
  *     "string\r\n".chop   #=> "string"
@@ -1697,8 +1849,7 @@ mrb_str_chop_bang(mrb_state *mrb, mrb_value str)
 static mrb_value
 mrb_str_chop(mrb_state *mrb, mrb_value self)
 {
-  mrb_value str;
-  str = mrb_str_dup(mrb, self);
+  mrb_value str = mrb_str_dup(mrb, self);
   mrb_str_chop_bang(mrb, str);
   return str;
 }
@@ -1708,7 +1859,7 @@ mrb_str_chop(mrb_state *mrb, mrb_value self)
  *  call-seq:
  *     str.downcase!   => str or nil
  *
- *  Downcases the contents of <i>str</i>, returning <code>nil</code> if no
+ *  Downcases the contents of *str*, returning `nil` if no
  *  changes were made.
  */
 static mrb_value
@@ -1738,7 +1889,7 @@ mrb_str_downcase_bang(mrb_state *mrb, mrb_value str)
  *  call-seq:
  *     str.downcase   => new_str
  *
- *  Returns a copy of <i>str</i> with all uppercase letters replaced with their
+ *  Returns a copy of *str* with all uppercase letters replaced with their
  *  lowercase counterparts. The operation is locale insensitive---only
  *  characters 'A' to 'Z' are affected.
  *
@@ -1747,9 +1898,7 @@ mrb_str_downcase_bang(mrb_state *mrb, mrb_value str)
 static mrb_value
 mrb_str_downcase(mrb_state *mrb, mrb_value self)
 {
-  mrb_value str;
-
-  str = mrb_str_dup(mrb, self);
+  mrb_value str = mrb_str_dup(mrb, self);
   mrb_str_downcase_bang(mrb, str);
   return str;
 }
@@ -1759,7 +1908,7 @@ mrb_str_downcase(mrb_state *mrb, mrb_value self)
  *  call-seq:
  *     str.empty?   => true or false
  *
- *  Returns <code>true</code> if <i>str</i> has a length of zero.
+ *  Returns `true` if *str* has a length of zero.
  *
  *     "hello".empty?   #=> false
  *     "".empty?        #=> true
@@ -1788,6 +1937,18 @@ mrb_str_eql(mrb_state *mrb, mrb_value self)
   return mrb_bool_value(eql_p);
 }
 
+/*
+ * @param mrb The mruby state.
+ * @param str The mruby string from which to take a substring.
+ * @param beg The starting character index of the substring.
+ * @param len The length in characters of the substring.
+ * @return A new mruby string representing the substring, or nil if out of bounds.
+ *
+ * Creates a new mruby string that is a substring of an existing string.
+ * This function considers character indices (which might differ from byte indices
+ * if UTF-8 is enabled) and length.
+ * Handles negative indices and adjusts length to fit within string boundaries.
+ */
 MRB_API mrb_value
 mrb_str_substr(mrb_state *mrb, mrb_value str, mrb_int beg, mrb_int len)
 {
@@ -1857,7 +2018,7 @@ mrb_str_hash_m(mrb_state *mrb, mrb_value self)
  *     str.include? other_str   => true or false
  *     str.include? int         => true or false
  *
- *  Returns <code>true</code> if <i>str</i> contains the given string or
+ *  Returns `true` if *str* contains the given string or
  *  character.
  *
  *     "hello".include? "lo"   #=> true
@@ -1879,8 +2040,8 @@ mrb_str_include(mrb_state *mrb, mrb_value self)
  *  call-seq:
  *    str.byteindex(substring, offset = 0) -> integer or nil
  *
- *  Returns the \Integer byte-based index of the first occurrence of the given +substring+,
- *  or +nil+ if none found:
+ *  Returns the \Integer byte-based index of the first occurrence of the given `substring`,
+ *  or `nil` if none found:
  *
  *    'foo'.byteindex('f') # => 0
  *    'foo'.byteindex('oo') # => 1
@@ -1913,7 +2074,7 @@ mrb_str_byteindex_m(mrb_state *mrb, mrb_value str)
  *     str.index(substring [, offset])   => int or nil
  *
  *  Returns the index of the first occurrence of the given
- *  <i>substring</i>. Returns <code>nil</code> if not found.
+ *  *substring*. Returns `nil` if not found.
  *  If the second parameter is present, it
  *  specifies the position in the string to begin the search.
  *
@@ -1975,7 +2136,7 @@ mrb_str_replace(mrb_state *mrb, mrb_value str)
  *  call-seq:
  *     String.new(str="")   => new_str
  *
- *  Returns a new string object containing a copy of <i>str</i>.
+ *  Returns a new string object containing a copy of *str*.
  */
 static mrb_value
 mrb_str_init(mrb_state *mrb, mrb_value self)
@@ -1996,7 +2157,7 @@ mrb_str_init(mrb_state *mrb, mrb_value self)
  *     str.intern   => symbol
  *     str.to_sym   => symbol
  *
- *  Returns the <code>Symbol</code> corresponding to <i>str</i>, creating the
+ *  Returns the `Symbol` corresponding to *str*, creating the
  *  symbol if it did not previously exist.
  *
  *     "Koala".intern         #=> :Koala
@@ -2006,9 +2167,16 @@ mrb_str_init(mrb_state *mrb, mrb_value self)
  *     s == :@cat             #=> true
  *
  *  This can also be used to create symbols that cannot be represented using the
- *  <code>:xxx</code> notation.
+ *  `:xxx` notation.
  *
  *     'cat and dog'.to_sym   #=> :"cat and dog"
+ */
+/*
+ * @param mrb The mruby state.
+ * @param self The mruby string to convert to a symbol.
+ * @return The mruby symbol corresponding to the string.
+ *
+ * Converts a mruby string to a symbol. If the symbol does not exist, it is created.
  */
 MRB_API mrb_value
 mrb_str_intern(mrb_state *mrb, mrb_value self)
@@ -2016,6 +2184,18 @@ mrb_str_intern(mrb_state *mrb, mrb_value self)
   return mrb_symbol_value(mrb_intern_str(mrb, self));
 }
 /* ---------------------------------- */
+/*
+ * @param mrb The mruby state.
+ * @param obj The mruby value to convert to a string.
+ * @return The string representation of the mruby value.
+ *
+ * Converts any mruby object to its string representation.
+ * For strings, it returns the object itself.
+ * For symbols, it returns the symbol's name as a string.
+ * For integers, it converts the integer to a string (base 10).
+ * For classes/modules, it returns their name.
+ * For other types, it calls the `to_s` method on the object.
+ */
 MRB_API mrb_value
 mrb_obj_as_string(mrb_state *mrb, mrb_value obj)
 {
@@ -2035,6 +2215,13 @@ mrb_obj_as_string(mrb_state *mrb, mrb_value obj)
   }
 }
 
+/*
+ * @param mrb The mruby state.
+ * @param p The pointer to convert.
+ * @return A new mruby string representing the pointer address.
+ *
+ * Converts a C pointer to a mruby string representation (e.g., "0x...").
+ */
 MRB_API mrb_value
 mrb_ptr_to_str(mrb_state *mrb, void *p)
 {
@@ -2082,7 +2269,7 @@ str_reverse(char *p, char *e)
  *  call-seq:
  *     str.reverse!   => str
  *
- *  Reverses <i>str</i> in place.
+ *  Reverses *str* in place.
  */
 static mrb_value
 mrb_str_reverse_bang(mrb_state *mrb, mrb_value str)
@@ -2127,7 +2314,7 @@ mrb_str_reverse_bang(mrb_state *mrb, mrb_value str)
  *  call-seq:
  *     str.reverse   => new_str
  *
- *  Returns a new string with the characters from <i>str</i> in reverse order.
+ *  Returns a new string with the characters from *str* in reverse order.
  *
  *     "stressed".reverse   #=> "desserts"
  */
@@ -2143,8 +2330,8 @@ mrb_str_reverse(mrb_state *mrb, mrb_value str)
  *  call-seq:
  *    byterindex(substring, offset = self.bytesize) -> integer or nil
  *
- *  Returns the \Integer byte-based index of the _last_ occurrence of the given +substring+,
- *  or +nil+ if none found:
+ *  Returns the \Integer byte-based index of the _last_ occurrence of the given `substring`,
+ *  or `nil` if none found:
  *
  *    'foo'.byterindex('f') # => 0
  *    'foo'.byterindex('o') # => 2
@@ -2154,9 +2341,9 @@ mrb_str_reverse(mrb_state *mrb, mrb_value str)
 static mrb_value
 mrb_str_byterindex_m(mrb_state *mrb, mrb_value str)
 {
+  mrb_int len = RSTRING_LEN(str);
   mrb_value sub;
   mrb_int pos;
-  mrb_int len = RSTRING_LEN(str);
 
   if (mrb_get_args(mrb, "S|i", &sub, &pos) == 1) {
     pos = len;
@@ -2182,8 +2369,8 @@ mrb_str_byterindex_m(mrb_state *mrb, mrb_value str)
  *  call-seq:
  *     str.rindex(substring [, offset])   => int or nil
  *
- *  Returns the index of the last occurrence of the given <i>substring</i>.
- *  Returns <code>nil</code> if not found. If the second parameter is
+ *  Returns the index of the last occurrence of the given *substring*.
+ *  Returns `nil` if not found. If the second parameter is
  *  present, it specifies the position in the string to end the
  *  search---characters beyond this point will not be considered.
  *
@@ -2236,20 +2423,20 @@ mrb_str_rindex_m(mrb_state *mrb, mrb_value str)
  *  call-seq:
  *     str.split(separator=nil, [limit])   => anArray
  *
- *  Divides <i>str</i> into substrings based on a delimiter, returning an array
+ *  Divides *str* into substrings based on a delimiter, returning an array
  *  of these substrings.
  *
- *  If <i>separator</i> is a <code>String</code>, then its contents are used as
- *  the delimiter when splitting <i>str</i>. If <i>separator</i> is a single
- *  space, <i>str</i> is split on whitespace, with leading whitespace and runs
+ *  If *separator* is a `String`, then its contents are used as
+ *  the delimiter when splitting *str*. If *separator* is a single
+ *  space, *str* is split on whitespace, with leading whitespace and runs
  *  of contiguous whitespace characters ignored.
  *
- *  If <i>separator</i> is omitted or <code>nil</code> (which is the default),
- *  <i>str</i> is split on whitespace as if ' ' were specified.
+ *  If *separator* is omitted or `nil` (which is the default),
+ *  *str* is split on whitespace as if ' ' were specified.
  *
- *  If the <i>limit</i> parameter is omitted, trailing null fields are
- *  suppressed. If <i>limit</i> is a positive number, at most that number of
- *  fields will be returned (if <i>limit</i> is <code>1</code>, the entire
+ *  If the *limit* parameter is omitted, trailing null fields are
+ *  suppressed. If *limit* is a positive number, at most that number of
+ *  fields will be returned (if *limit* is `1`, the entire
  *  string is returned as the only entry in an array). If negative, there is no
  *  limit to the number of fields returned, and trailing null fields are not
  *  suppressed.
@@ -2266,18 +2453,14 @@ mrb_str_rindex_m(mrb_state *mrb, mrb_value str)
 static mrb_value
 mrb_str_split_m(mrb_state *mrb, mrb_value str)
 {
-  mrb_int argc;
   mrb_value spat = mrb_nil_value();
   enum {awk, string} split_type = string;
   mrb_int i = 0;
-  mrb_int beg;
-  mrb_int end;
   mrb_int lim = 0;
-  mrb_bool lim_p;
-  mrb_value result, tmp;
+  mrb_value tmp;
 
-  argc = mrb_get_args(mrb, "|oi", &spat, &lim);
-  lim_p = (lim > 0 && argc == 2);
+  mrb_int argc = mrb_get_args(mrb, "|oi", &spat, &lim);
+  mrb_bool lim_p = (lim > 0 && argc == 2);
   if (argc == 2) {
     if (lim == 1) {
       if (RSTRING_LEN(str) == 0)
@@ -2297,16 +2480,16 @@ mrb_str_split_m(mrb_state *mrb, mrb_value str)
     split_type = awk;
   }
 
-  result = mrb_ary_new(mrb);
-  beg = 0;
+  mrb_value result = mrb_ary_new(mrb);
+  mrb_int beg = 0;
   if (split_type == awk) {
     mrb_bool skip = TRUE;
-    mrb_int idx = 0;
     mrb_int str_len = RSTRING_LEN(str);
-    unsigned int c;
+    mrb_int idx = beg;
+    mrb_int end = beg;
     int ai = mrb_gc_arena_save(mrb);
+    unsigned int c;
 
-    idx = end = beg;
     while (idx < str_len) {
       c = (unsigned char)RSTRING_PTR(str)[idx++];
       if (skip) {
@@ -2338,6 +2521,7 @@ mrb_str_split_m(mrb_state *mrb, mrb_value str)
     int ai = mrb_gc_arena_save(mrb);
 
     while (idx < str_len) {
+      mrb_int end;
       if (pat_len > 0) {
         end = mrb_memsearch(RSTRING_PTR(spat), pat_len, RSTRING_PTR(str)+idx, str_len - idx);
         if (end < 0) break;
@@ -2557,6 +2741,18 @@ mrb_str_len_to_integer(mrb_state *mrb, const char *str, size_t len, mrb_int base
 }
 
 /* obsolete: use RSTRING_CSTR() or mrb_string_cstr() */
+/*
+ * @deprecated Use `RSTRING_CSTR()` or `mrb_string_cstr()` instead.
+ * @param mrb The mruby state.
+ * @param ptr Pointer to the mruby string value.
+ * @return A pointer to a null-terminated C string.
+ *
+ * Ensures the mruby string pointed to by `ptr` is a string and returns its
+ * C string representation. If the string contains null bytes, it raises an
+ * E_ARGUMENT_ERROR. If the string is not null-terminated, it modifies the
+ * string in place to add a null terminator (this might involve unsharing
+ * the string buffer).
+ */
 MRB_API const char*
 mrb_string_value_cstr(mrb_state *mrb, mrb_value *ptr)
 {
@@ -2578,26 +2774,47 @@ mrb_string_value_cstr(mrb_state *mrb, mrb_value *ptr)
    * Even after str_modify_keep_ascii(), NULL termination is not ensured if
    * RSTR_SET_LEN() is used explicitly (e.g. String#delete_suffix!).
    */
-  str_modify_keep_ascii(mrb, ps);
+  str_unshare_buffer(mrb, ps);
   RSTR_PTR(ps)[len] = '\0';
   return RSTR_PTR(ps);
 }
 
+/*
+ * @param mrb The mruby state.
+ * @param str The mruby string value.
+ * @return A pointer to a null-terminated C string.
+ *
+ * Ensures the mruby string `str` is a string and returns its C string representation.
+ * This is a convenience wrapper around `mrb_string_value_cstr`.
+ * If the string contains null bytes, it raises an E_ARGUMENT_ERROR.
+ * If the string is not null-terminated, it modifies the string in place
+ * to add a null terminator.
+ */
 MRB_API const char*
 mrb_string_cstr(mrb_state *mrb, mrb_value str)
 {
   return mrb_string_value_cstr(mrb, &str);
 }
 
+/*
+ * @param mrb The mruby state.
+ * @param str The mruby string to convert.
+ * @param base The base for conversion (0 or 2-36).
+ * @param badcheck If `TRUE`, raise an error on invalid input; otherwise, return 0.
+ * @return An mruby integer value.
+ *
+ * Converts an mruby string to an mruby integer.
+ * Interprets leading characters in `str` as an integer of the specified `base`.
+ * If `base` is 0, it auto-detects the base (0x for hex, 0b for binary, 0o or 0 for octal, else decimal).
+ * If `badcheck` is true, invalid characters will raise an `E_ARGUMENT_ERROR`.
+ * Otherwise, extraneous characters are ignored, and 0 is returned for invalid numbers.
+ */
 MRB_API mrb_value
 mrb_str_to_integer(mrb_state *mrb, mrb_value str, mrb_int base, mrb_bool badcheck)
 {
-  const char *s;
-  mrb_int len;
-
   mrb_ensure_string_type(mrb, str);
-  s = RSTRING_PTR(str);
-  len = RSTRING_LEN(str);
+  const char *s = RSTRING_PTR(str);
+  mrb_int len = RSTRING_LEN(str);
   return mrb_str_len_to_integer(mrb, s, len, base, badcheck);
 }
 
@@ -2606,10 +2823,10 @@ mrb_str_to_integer(mrb_state *mrb, mrb_value str, mrb_int base, mrb_bool badchec
  *  call-seq:
  *     str.to_i(base=10)   => integer
  *
- *  Returns the result of interpreting leading characters in <i>str</i> as an
- *  integer base <i>base</i> (between 2 and 36). Extraneous characters past the
+ *  Returns the result of interpreting leading characters in *str* as an
+ *  integer base *base* (between 2 and 36). Extraneous characters past the
  *  end of a valid number are ignored. If there is not a valid number at the
- *  start of <i>str</i>, <code>0</code> is returned. This method never raises an
+ *  start of *str*, `0` is returned. This method never raises an
  *  exception.
  *
  *     "12345".to_i             #=> 12345
@@ -2635,6 +2852,7 @@ mrb_str_to_i(mrb_state *mrb, mrb_value self)
 }
 
 #ifndef MRB_NO_FLOAT
+/* Internal helper for mrb_str_to_dbl */
 static double
 mrb_str_len_to_dbl(mrb_state *mrb, const char *s, size_t len, mrb_bool badcheck)
 {
@@ -2723,6 +2941,17 @@ bad:
   return d;
 }
 
+/*
+ * @param mrb The mruby state.
+ * @param str The mruby string to convert.
+ * @param badcheck If `TRUE`, raise an error on invalid input; otherwise, return 0.0.
+ * @return A C double value.
+ *
+ * Converts an mruby string to a C double.
+ * Interprets leading characters in `str` as a floating-point number.
+ * If `badcheck` is true, invalid characters will raise an `E_ARGUMENT_ERROR`.
+ * Otherwise, extraneous characters are ignored, and 0.0 is returned for invalid numbers.
+ */
 MRB_API double
 mrb_str_to_dbl(mrb_state *mrb, mrb_value str, mrb_bool badcheck)
 {
@@ -2734,10 +2963,10 @@ mrb_str_to_dbl(mrb_state *mrb, mrb_value str, mrb_bool badcheck)
  *  call-seq:
  *     str.to_f   => float
  *
- *  Returns the result of interpreting leading characters in <i>str</i> as a
+ *  Returns the result of interpreting leading characters in *str* as a
  *  floating-point number. Extraneous characters past the end of a valid number
- *  are ignored. If there is not a valid number at the start of <i>str</i>,
- *  <code>0.0</code> is returned. This method never raises an exception.
+ *  are ignored. If there is not a valid number at the start of *str*,
+ *  `0.0` is returned. This method never raises an exception.
  *
  *     "123.45e1".to_f        #=> 1234.5
  *     "45.67 degrees".to_f   #=> 45.67
@@ -2771,7 +3000,7 @@ mrb_str_to_s(mrb_state *mrb, mrb_value self)
  *  call-seq:
  *     str.upcase!   => str or nil
  *
- *  Upcases the contents of <i>str</i>, returning <code>nil</code> if no changes
+ *  Upcases the contents of *str*, returning `nil` if no changes
  *  were made.
  */
 static mrb_value
@@ -2801,7 +3030,7 @@ mrb_str_upcase_bang(mrb_state *mrb, mrb_value str)
  *  call-seq:
  *     str.upcase   => new_str
  *
- *  Returns a copy of <i>str</i> with all lowercase letters replaced with their
+ *  Returns a copy of *str* with all lowercase letters replaced with their
  *  uppercase counterparts. The operation is locale insensitive---only
  *  characters 'a' to 'z' are affected.
  *
@@ -2810,9 +3039,7 @@ mrb_str_upcase_bang(mrb_state *mrb, mrb_value str)
 static mrb_value
 mrb_str_upcase(mrb_state *mrb, mrb_value self)
 {
-  mrb_value str;
-
-  str = mrb_str_dup(mrb, self);
+  mrb_value str = mrb_str_dup(mrb, self);
   mrb_str_upcase_bang(mrb, str);
   return str;
 }
@@ -2821,8 +3048,8 @@ mrb_str_upcase(mrb_state *mrb, mrb_value self)
  *  call-seq:
  *     str.dump   -> new_str
  *
- *  Produces a version of <i>str</i> with all nonprinting characters replaced by
- *  <code>\nnn</code> notation and all special characters escaped.
+ *  Produces a version of *str* with all nonprinting characters replaced by
+ *  `\nnn` notation and all special characters escaped.
  */
 mrb_value
 mrb_str_dump(mrb_state *mrb, mrb_value str)
@@ -2830,12 +3057,21 @@ mrb_str_dump(mrb_state *mrb, mrb_value str)
   return str_escape(mrb, str, FALSE);
 }
 
+/*
+ * @param mrb The mruby state.
+ * @param str The mruby string to append to (modified in place).
+ * @param ptr A pointer to the C string to append.
+ * @param len The length of the C string to append.
+ * @return The modified mruby string `str`.
+ *
+ * Appends a C string of a given length to an mruby string.
+ * The mruby string `str` is modified in place. Handles resizing and
+ * potential overlap if `ptr` is within `str`'s buffer.
+ */
 MRB_API mrb_value
 mrb_str_cat(mrb_state *mrb, mrb_value str, const char *ptr, size_t len)
 {
   struct RString *s = mrb_str_ptr(str);
-  mrb_int capa;
-  mrb_int total;
   ptrdiff_t off = -1;
 
   if (len == 0) return str;
@@ -2844,7 +3080,8 @@ mrb_str_cat(mrb_state *mrb, mrb_value str, const char *ptr, size_t len)
       off = ptr - RSTR_PTR(s);
   }
 
-  capa = RSTR_CAPA(s);
+  mrb_int capa = RSTR_CAPA(s);
+  mrb_int total;
   if (mrb_int_add_overflow(RSTR_LEN(s), len, &total)) {
   size_error:
     mrb_raise(mrb, E_ARGUMENT_ERROR, "string size too big");
@@ -2865,12 +3102,30 @@ mrb_str_cat(mrb_state *mrb, mrb_value str, const char *ptr, size_t len)
   return str;
 }
 
+/*
+ * @param mrb The mruby state.
+ * @param str The mruby string to append to (modified in place).
+ * @param ptr A pointer to the null-terminated C string to append.
+ * @return The modified mruby string `str`.
+ *
+ * Appends a null-terminated C string to an mruby string.
+ * The mruby string `str` is modified in place.
+ */
 MRB_API mrb_value
 mrb_str_cat_cstr(mrb_state *mrb, mrb_value str, const char *ptr)
 {
   return mrb_str_cat(mrb, str, ptr, ptr ? strlen(ptr) : 0);
 }
 
+/*
+ * @param mrb The mruby state.
+ * @param str The mruby string to append to (modified in place).
+ * @param str2 The mruby string to append.
+ * @return The modified mruby string `str`.
+ *
+ * Appends an mruby string (`str2`) to another mruby string (`str`).
+ * The mruby string `str` is modified in place. Handles self-appendage.
+ */
 MRB_API mrb_value
 mrb_str_cat_str(mrb_state *mrb, mrb_value str, mrb_value str2)
 {
@@ -2880,6 +3135,17 @@ mrb_str_cat_str(mrb_state *mrb, mrb_value str, mrb_value str2)
   return mrb_str_cat(mrb, str, RSTRING_PTR(str2), RSTRING_LEN(str2));
 }
 
+/*
+ * @param mrb The mruby state.
+ * @param str1 The mruby string to append to (modified in place).
+ * @param str2 The mruby value to append (will be converted to a string if not already one).
+ * @return The modified mruby string `str1`.
+ *
+ * Appends an mruby value (`str2`) to an mruby string (`str1`).
+ * `str2` is first ensured to be a string (converted if necessary).
+ * Then, `str1` is modified in place. This is similar to `mrb_str_concat`
+ * but `mrb_str_concat` takes `self` and `other` as parameters.
+ */
 MRB_API mrb_value
 mrb_str_append(mrb_state *mrb, mrb_value str1, mrb_value str2)
 {
@@ -2897,6 +3163,15 @@ mrb_str_append(mrb_state *mrb, mrb_value str1, mrb_value str2)
  *    str = "hello"
  *    str[3] = "\b"
  *    str.inspect       #=> "\"hel\\bo\""
+ */
+/*
+ * @param mrb The mruby state.
+ * @param str The mruby string to inspect.
+ * @return A new mruby string that is the inspect-representation of `str`.
+ *
+ * Returns a human-readable, printable version of the string, typically
+ * surrounded by quotes and with special characters escaped.
+ * UTF-8 characters are preserved if `MRB_UTF8_STRING` is defined and `inspect` is true.
  */
 mrb_value
 mrb_str_inspect(mrb_state *mrb, mrb_value str)
@@ -2931,7 +3206,7 @@ mrb_str_bytes(mrb_state *mrb, mrb_value str)
  *  call-seq:
  *     str.getbyte(index)          -> 0 .. 255
  *
- *  returns the <i>index</i>th byte as an integer.
+ *  returns the *index*th byte as an integer.
  */
 static mrb_value
 mrb_str_getbyte(mrb_state *mrb, mrb_value str)
@@ -2951,17 +3226,16 @@ mrb_str_getbyte(mrb_state *mrb, mrb_value str)
  *  call-seq:
  *     str.setbyte(index, integer) -> integer
  *
- *  modifies the <i>index</i>th byte as <i>integer</i>.
+ *  modifies the *index*th byte as *integer*.
  */
 static mrb_value
 mrb_str_setbyte(mrb_state *mrb, mrb_value str)
 {
   mrb_int pos, byte;
-  mrb_int len;
 
   mrb_get_args(mrb, "ii", &pos, &byte);
 
-  len = RSTRING_LEN(str);
+  mrb_int len = RSTRING_LEN(str);
   if (pos < -len || len <= pos)
     mrb_raisef(mrb, E_INDEX_ERROR, "index %i out of string", pos);
   if (pos < 0)
@@ -2984,8 +3258,8 @@ mrb_str_setbyte(mrb_state *mrb, mrb_value str)
  *  objects, returns a substring starting at the offset given by the first, and
  *  a length given by the second. If given a Range, a substring containing
  *  bytes at offsets given by the range is returned. In all three cases, if
- *  an offset is negative, it is counted from the end of <i>str</i>. Returns
- *  <code>nil</code> if the initial offset falls outside the string, the length
+ *  an offset is negative, it is counted from the end of *str*. Returns
+ *  `nil` if the initial offset falls outside the string, the length
  *  is negative, or the beginning of the range is greater than the end.
  *  The encoding of the resulted string keeps original encoding.
  *
@@ -3040,10 +3314,12 @@ sub_replace(mrb_state *mrb, mrb_value self)
   char *p, *match;
   mrb_int plen, mlen;
   mrb_int found, offset;
-  mrb_value result;
 
   mrb_get_args(mrb, "ssi", &p, &plen, &match, &mlen, &found);
-  result = mrb_str_new(mrb, 0, 0);
+  if (found < 0 || RSTRING_LEN(self) < found) {
+    mrb_raise(mrb, E_RUNTIME_ERROR, "argument out of range");
+  }
+  mrb_value result = mrb_str_new(mrb, 0, 0);
   for (mrb_int i=0; i<plen; i++) {
     if (p[i] != '\\' || i+1==plen) {
       mrb_str_cat(mrb, result, p+i, 1);
@@ -3127,13 +3403,15 @@ str_bytesplice(mrb_state *mrb, mrb_value str, mrb_int idx1, mrb_int len1, mrb_va
  *    bytesplice(range, str) -> string
  *    bytesplice(range, str, str_range) -> string
  *
- *  Replaces some or all of the content of +self+ with +str+, and returns +self+.
+ *  Replaces some or all of the content of `self` with `str`, and returns `self`.
  *  The portion of the string affected is determined using
- *  the same criteria as String#byteslice, except that +length+ cannot be omitted.
+ *  the same criteria as String#byteslice, except that `length` cannot be omitted.
  *  If the replacement string is not the same length as the text it is replacing,
  *  the string will be adjusted accordingly.
  *
- *  If +str_index+ and +str_length+, or +str_range+ are given, the content of +self+ is replaced by str.byteslice(str_index, str_length) or str.byteslice(str_range); however the substring of +str+ is not allocated as a new string.
+ *  If `str_index` and `str_length`, or `str_range` are given, the content of `self`
+ *  is replaced by str.byteslice(str_index, str_length) or str.byteslice(str_range);
+ *  however the substring of `str` is not allocated as a new string.
  *
  *  The form that take an Integer will raise an IndexError if the value is out
  *  of range; the Range form will raise a RangeError.
@@ -3187,7 +3465,7 @@ mrb_init_string(mrb_state *mrb)
 {
   struct RClass *s;
 
-  mrb_static_assert(RSTRING_EMBED_LEN_MAX < (1 << MRB_STR_EMBED_LEN_BIT),
+  mrb_static_assert(RSTRING_EMBED_LEN_MAX < (1 << MRB_STR_EMBED_LEN_BITS),
                     "pointer size too big for embedded string");
 
   mrb->string_class = s = mrb_define_class_id(mrb, MRB_SYM(String), mrb->object_class);             /* 15.2.10 */
@@ -3216,7 +3494,7 @@ mrb_init_string(mrb_state *mrb)
   mrb_define_method_id(mrb, s, MRB_SYM_Q(include),       mrb_str_include,         MRB_ARGS_REQ(1)); /* 15.2.10.5.21 */
   mrb_define_method_id(mrb, s, MRB_SYM(index),           mrb_str_index_m,         MRB_ARGS_ARG(1,1));  /* 15.2.10.5.22 */
   mrb_define_method_id(mrb, s, MRB_SYM(initialize),      mrb_str_init,            MRB_ARGS_REQ(1)); /* 15.2.10.5.23 */
-  mrb_define_method_id(mrb, s, MRB_SYM(initialize_copy), mrb_str_replace,         MRB_ARGS_REQ(1)); /* 15.2.10.5.24 */
+  mrb_define_private_method_id(mrb, s, MRB_SYM(initialize_copy), mrb_str_replace, MRB_ARGS_REQ(1)); /* 15.2.10.5.24 */
   mrb_define_method_id(mrb, s, MRB_SYM(intern),          mrb_str_intern,          MRB_ARGS_NONE()); /* 15.2.10.5.25 */
   mrb_define_method_id(mrb, s, MRB_SYM(length),          mrb_str_size,            MRB_ARGS_NONE()); /* 15.2.10.5.26 */
   mrb_define_method_id(mrb, s, MRB_SYM(replace),         mrb_str_replace,         MRB_ARGS_REQ(1)); /* 15.2.10.5.28 */

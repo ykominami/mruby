@@ -3,6 +3,7 @@
 #include <mruby/class.h>
 #include <mruby/hash.h>
 #include <mruby/proc.h>
+#include <mruby/internal.h>
 #include <mruby/presym.h>
 
 /*
@@ -65,7 +66,7 @@ nil_to_i(mrb_state *mrb, mrb_value obj)
  *  call-seq:
  *     obj.itself -> an_object
  *
- *  Returns <i>obj</i>.
+ *  Returns *obj*.
  *
  *      string = 'my string' #=> "my string"
  *      string.itself.object_id == string.object_id #=> true
@@ -77,7 +78,7 @@ nil_to_i(mrb_state *mrb, mrb_value obj)
  *     obj.instance_exec(arg...) {|var...| block }                       -> obj
  *
  *  Executes the given block within the context of the receiver
- *  (_obj_). In order to set the context, the variable +self+ is set
+ *  (_obj_). In order to set the context, the variable `self` is set
  *  to _obj_ while the code is executing, giving the code access to
  *  _obj_'s instance variables.  Arguments are passed as block parameters.
  *
@@ -93,18 +94,7 @@ nil_to_i(mrb_state *mrb, mrb_value obj)
 static mrb_value
 obj_instance_exec(mrb_state *mrb, mrb_value self)
 {
-  const mrb_value *argv;
-  mrb_int argc;
-  mrb_value blk;
-  struct RClass *c;
-
-  mrb_get_args(mrb, "*&!", &argv, &argc, &blk);
-  c = mrb_singleton_class_ptr(mrb, self);
-  if (mrb->c->ci->cci > 0) {
-    return mrb_yield_with_class(mrb, blk, argc, argv, self, c);
-  }
-  mrb_vm_ci_target_class_set(mrb->c->ci, c);
-  return mrb_yield_cont(mrb, blk, self, argc, argv);
+  return mrb_object_exec(mrb, self, mrb_singleton_class_ptr(mrb, self));
 }
 
 void

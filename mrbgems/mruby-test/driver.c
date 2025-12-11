@@ -229,6 +229,8 @@ mrb_init_test_driver(mrb_state *mrb, mrb_bool verbose)
 #else
   mrb_define_const(mrb, mrbtest, "FLOAT_TOLERANCE", mrb_float_value(mrb, 1e-10));
 #endif
+#else
+  (void)mrbtest;
 #endif
 
   mrb_init_test_vformat(mrb);
@@ -288,8 +290,9 @@ main(int argc, char **argv)
 
   /* new interpreter instance */
   mrb = mrb_open();
-  if (mrb == NULL) {
-    fputs("Invalid mrb_state, exiting test driver", stderr);
+  if (MRB_OPEN_FAILURE(mrb)) {
+    mrb_print_error(mrb);  /* handles NULL */
+    mrb_close(mrb);        /* handles NULL */
     return EXIT_FAILURE;
   }
 

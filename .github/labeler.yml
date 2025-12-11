@@ -19,8 +19,11 @@ build:
               - lib/**/*
               - minirake
               - tasks/**/*
+              - .codespellrc
               - .dockerignore
               - .pre-commit-config.yaml
+              - .prettierignore
+              - .prettierrc
               - .travis.yml
               - .yardopts
 core:
@@ -71,3 +74,8 @@ oss-fuzz:
       - changed-files:
           - any-glob-to-any-file:
               - oss-fuzz/**/*
+tools:
+  - any:
+      - changed-files:
+          - any-glob-to-any-file:
+              - tools/**/*

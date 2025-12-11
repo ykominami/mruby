@@ -70,27 +70,33 @@ end
 
 assert('Kernel#private_methods', '15.3.1.3.36') do
   assert_equal Array, private_methods.class
+  c = Class.new do
+    private def foo
+    end
+  end
+  assert_equal [:foo], c.new.private_methods(false)
 end
 
 assert('Kernel#protected_methods', '15.3.1.3.37') do
   assert_equal Array, protected_methods.class
+  c = Class.new do
+    protected def foo
+    end
+  end
+  assert_equal [:foo], c.new.protected_methods(false)
 end
 
 assert('Kernel#public_methods', '15.3.1.3.38') do
   assert_equal Array, public_methods.class
-  class Foo
+  c = Class.new do
     def foo
     end
   end
-  assert_equal [:foo], Foo.new.public_methods(false)
+  assert_equal [:foo], c.new.public_methods(false)
 end
 
 assert('Kernel#singleton_methods', '15.3.1.3.45') do
   assert_equal singleton_methods.class, Array
-end
-
-assert('Kernel.global_variables', '15.3.1.2.4') do
-  assert_equal Array, Kernel.global_variables.class
 end
 
 assert('Kernel#global_variables', '15.3.1.3.14') do
@@ -104,6 +110,8 @@ assert('Kernel#global_variables', '15.3.1.3.14') do
   assert_equal(1, variables2.size - variables1.size)
 end
 
+# Kernel.global_variables is not provided by mruby. '15.3.1.2.4'
+
 assert('Kernel#local_variables', '15.3.1.3.28') do
   assert_equal Array, local_variables.class
 
@@ -115,28 +123,7 @@ assert('Kernel#local_variables', '15.3.1.3.28') do
   assert_equal [:a], local_var_list
 end
 
-assert('Kernel.local_variables', '15.3.1.2.7') do
-  a, b = 0, 1
-  a += b
-
-  vars = Kernel.local_variables.sort
-  assert_equal [:a, :b, :vars], vars
-
-  assert_equal [:a, :b, :c, :vars], Proc.new { |a, b|
-    c = 2
-    # Kernel#local_variables: 15.3.1.3.28
-    local_variables.sort
-  }.call(-1, -2)
-
-  a = Object.new
-  def a.hoge(vars, *, **)
-    Proc.new {
-      x, y = 1, 2
-      local_variables.sort
-    }
-  end
-  assert_equal([:vars, :x, :y]) { a.hoge(0).call }
-end
+# Kernel.local_variables is not provided by mruby. '15.3.1.2.7'
 
 assert('Kernel#define_singleton_method') do
   o = Object.new

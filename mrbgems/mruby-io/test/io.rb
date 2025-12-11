@@ -2,7 +2,7 @@
 # IO Test
 
 MRubyIOTestUtil.io_test_setup
-$cr, $crlf, $cmd = MRubyIOTestUtil.win? ? [1, "\r\n", "cmd /c "] : [0, "\n", ""]
+$cr, $cmd = MRubyIOTestUtil.win? ? [1, "cmd /c "] : [0, ""]
 
 def assert_io_open(meth)
   assert "assert_io_open" do
@@ -589,7 +589,7 @@ assert('IO#sysseek') do
 end
 
 assert('IO#pread') do
-  skip "IO#pread is not implemented on this configuration" unless MRubyIOTestUtil::MRB_WITH_IO_PREAD_PWRITE
+  skip "IO#pread is not implemented on this configuration" unless MRubyIOTestUtil::MRB_USE_IO_PREAD_PWRITE
 
   IO.open(IO.sysopen($mrbtest_io_rfname, 'r'), 'r') do |io|
     assert_equal $mrbtest_io_msg.byteslice(5, 8), io.pread(8, 5)
@@ -601,7 +601,7 @@ assert('IO#pread') do
 end
 
 assert('IO#pwrite') do
-  skip "IO#pwrite is not implemented on this configuration" unless MRubyIOTestUtil::MRB_WITH_IO_PREAD_PWRITE
+  skip "IO#pwrite is not implemented on this configuration" unless MRubyIOTestUtil::MRB_USE_IO_PREAD_PWRITE
 
   IO.open(IO.sysopen($mrbtest_io_wfname, 'w+'), 'w+') do |io|
     assert_equal 6, io.pwrite("Warld!", 7)
@@ -658,7 +658,8 @@ end
 
 assert('`cmd`') do
   begin
-    assert_equal `#{$cmd}echo foo`, "foo#{$crlf}"
+    result = `#{$cmd}echo foo`
+    assert_equal "foo", result.chomp
   rescue NotImplementedError => e
     skip e.message
   end

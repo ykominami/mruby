@@ -71,6 +71,63 @@ assert('break', '11.5.2.4.3') do
     end
   end
   assert_equal [1,2,3,4], a
+
+  a = []
+  begin
+    while true
+      a.push 1
+      break
+      a.push "NG"
+    end
+  ensure
+    a.push 2
+  end
+  assert_equal [1, 2], a
+
+  a = []
+  begin
+    while true
+      a.push 1
+      break
+    end
+    a.push 2
+  ensure
+    a.push 3
+  end
+  assert_equal [1, 2, 3], a
+
+  a = []
+  begin
+    while true
+      begin
+        a.push 1
+        break
+      ensure
+        a.push 2
+      end
+      a.push "NG"
+    end
+  ensure
+    a.push 3
+  end
+  assert_equal [1, 2, 3], a
+
+  a = []
+  begin
+    while true
+      begin
+        a.push 1
+        break
+      ensure
+        a.push 2
+      end
+      a.push "NG"
+    end
+    a.push 3
+  ensure
+    a.push 4
+  end
+  assert_equal [1, 2, 3, 4], a
 end
 
 assert('redo', '11.5.2.4.5') do
@@ -95,6 +152,43 @@ assert('redo', '11.5.2.4.5') do
     a.push(n)
   end
   assert_equal [1,3,4], a
+
+  a = []
+  limit = 3
+  e = RuntimeError.new("!")
+  for i in 0...3
+    begin
+      limit -= 1
+      break unless limit > 0
+      a.push i * 3 + 1
+      raise e
+    rescue
+      a.push i * 3 + 2
+      redo
+    ensure
+      a.push i * 3 + 3
+    end
+  end
+  assert_equal [1, 2, 3, 1, 2, 3, 3], a
+
+  a = []
+  limit = 3
+  e = RuntimeError.new("!")
+  for i in 0...3
+    a.push i * 4 + 1
+    begin
+      limit -= 1
+      break unless limit > 0
+      a.push i * 4 + 2
+      raise e
+    rescue
+      a.push i * 4 + 3
+      redo
+    ensure
+      a.push i * 4 + 4
+    end
+  end
+  assert_equal [1, 2, 3, 4, 1, 2, 3, 4, 1, 4], a
 end
 
 assert('Abbreviated variable assignment', '11.4.2.3.2') do
@@ -711,11 +805,28 @@ end
 assert('numbered parameters') do
   assert_equal(15, [1,2,3,4,5].reduce {_1+_2})
   assert_equal(45, Proc.new do _1 + _2 + _3 + _4 + _5 + _6 + _7 + _8 + _9 end.call(*[1, 2, 3, 4, 5, 6, 7, 8, 9]))
+  assert_equal(5, -> { _1 }.call(5))
 end
 
 assert('_0 is not numbered parameter') do
   _0 = :l
   assert_equal(:l, ->{_0}.call)
+end
+
+assert('numbered parameters in symbol name (https://github.com/mruby/mruby/issues/5295)') do
+  assert_equal([:_1], Array.new(1) {:_1})
+end
+
+assert('numbered parameters as hash key') do
+  h = {_1: 3}
+  assert_equal(3, h[:_1])
+  assert_equal(7, -> { _1 }.call(7))
+end
+
+assert('numbered parameters as singleton') do
+  o = Object.new
+  lambda { def _1.a(b) = "a#{b}" }.call(o)
+  assert_equal('ab', o.a('b'))
 end
 
 assert('argument forwarding') do
@@ -770,4 +881,65 @@ assert('endless def') do
   assert_equal(45, o.cm3(o.cm2))
   assert_equal(43, c.cs1)
   assert_equal(45, c.cs3(c.cs2))
+end
+
+assert('at-least-once loop') do
+  # basic at-least-once loop that executes once
+  count = 0
+  begin
+    count += 1
+  end while false
+  assert_equal 1, count
+
+  # at-least-once loop with true condition
+  count = 0
+  begin
+    count += 1
+  end while count < 3
+  assert_equal 3, count
+
+  # at-least-once loop with break
+  count = 0
+  begin
+    count += 1
+    break if count == 2
+  end while count < 10
+  assert_equal 2, count
+
+  # at-least-once loop with next
+  count = 0
+  sum = 0
+  begin
+    count += 1
+    if count == 2
+      next
+    end
+    sum += count
+  end while count < 4
+  assert_equal 4, count
+  assert_equal 8, sum  # 1 + 3 + 4 = 8 (skipped 2)
+
+  # nested at-least-once loops
+  outer_count = 0
+  total = 0
+  begin
+    outer_count += 1
+    inner_count = 0
+    begin
+      inner_count += 1
+      total += inner_count
+    end while inner_count < 2
+  end while outer_count < 2
+  assert_equal 2, outer_count
+  assert_equal 6, total  # (1+2) + (1+2) = 6
+
+  # at-least-once loop with exception handling
+  count = 0
+  begin
+    count += 1
+    raise "error" if count == 2
+  rescue
+    count += 10
+  end while count < 5
+  assert_equal 12, count  # 1, then 2+10=12
 end

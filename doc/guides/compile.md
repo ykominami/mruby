@@ -1,3 +1,5 @@
+<!-- summary: About the Compile -->
+
 # Compile
 
 mruby uses Rake to compile and cross-compile all libraries and
@@ -174,7 +176,7 @@ If you need an include path of header file use `search_header_path`:
 fail 'iconv.h not found' unless conf.cc.search_header_path 'iconv.h'
 ```
 
-If you need a full file name of header file use `search_header`:
+If you need a full filename of header file use `search_header`:
 
 ```ruby
 # Searches `iconv.h`.
@@ -636,6 +638,33 @@ To summarize:
 - For the "host" build target, the default value of `MRuby::Build#install_prefix` is `<PREFIX>`.
 - For a build target other than "host", the default value of `MRuby::Build#install_prefix` is `<PREFIX>/mruby/<build-name>`.
 - If the environment variable `DESTDIR` is set, the actual write directory is `<DESTDIR>/<MRuby::Build#install_prefix>`.
+
+### Excluded files
+
+In some cases there are files that you do not want to install.
+In such cases, add a file path filter to the array object `MRuby::Build#install_excludes` to exclude them.
+
+The following is an object that can be defined as a file path filter.
+The `path` variable that appears is a relative path based on `MRuby::Build#build_dir`.
+
+- string objects: files matched by `string.match?(path)` are excluded.
+- regexp object: files matched by `regexp.match?(path)` are excluded.
+- proc object: files which return true with `proc.call(path)` are excluded.
+
+```ruby
+# exclude bin/mrbc
+conf.install_excludes << exefile("bin/mrbc")
+
+# exclude all files under lib/ directory
+conf.install_excludes << %r(^lib/)
+
+# exclude bin/mrbtest, but in this case it is recommended to use string instead of proc
+conf.install_excludes << proc { |path|
+  path == exefile("bin/mrbtest")
+}
+```
+
+By default, it contains only a proc object to exclude `libmruby_core`.
 
 ## Tips
 

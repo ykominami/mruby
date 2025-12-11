@@ -56,20 +56,6 @@ assert('Module#ancestors', '15.2.2.4.9') do
   assert_true r.include?(Object)
 end
 
-assert('Module#append_features', '15.2.2.4.10') do
-  module Test4AppendFeatures
-    def self.append_features(mod)
-      Test4AppendFeatures2.const_set(:Const4AppendFeatures2, mod)
-    end
-  end
-  module Test4AppendFeatures2
-    include Test4AppendFeatures
-  end
-
-  assert_equal Test4AppendFeatures2, Test4AppendFeatures2.const_get(:Const4AppendFeatures2)
-  assert_raise(FrozenError) { Module.new.append_features Class.new.freeze }
-end
-
 assert('Module#attr NameError') do
   %w[
     foo?
@@ -288,16 +274,15 @@ assert('Module#remove_const', '15.2.2.4.40') do
   module Test4RemoveConst
     ExistingConst = 23
   end
-
-  assert_equal 23, Test4RemoveConst.remove_const(:ExistingConst)
+  assert_equal 23, Test4RemoveConst.__send__(:remove_const,:ExistingConst)
   assert_false Test4RemoveConst.const_defined?(:ExistingConst)
   assert_raise_with_message_pattern(NameError, "constant * not defined") do
-    Test4RemoveConst.remove_const(:NonExistingConst)
+    Test4RemoveConst.__send__(:remove_const,:NonExistingConst)
   end
   %i[x X!].each do |n|
-    assert_wrong_const_name { Test4RemoveConst.remove_const(n) }
+    assert_wrong_const_name { Test4RemoveConst.__send__(:remove_const,n) }
   end
-  assert_raise(FrozenError) { Test4RemoveConst.freeze.remove_const(:A) }
+  assert_raise(FrozenError) { Test4RemoveConst.freeze.__send__(:remove_const,:A) }
 end
 
 assert('Module#const_missing', '15.2.2.4.22') do
@@ -308,18 +293,6 @@ assert('Module#const_missing', '15.2.2.4.22') do
   end
 
   assert_equal 42, Test4ConstMissing.const_get(:ConstDoesntExist)
-end
-
-assert('Module#extend_object', '15.2.2.4.25') do
-  cls = Class.new
-  mod = Module.new { def foo; end }
-  a = cls.new
-  b = cls.new
-  mod.extend_object(b)
-  assert_false a.respond_to?(:foo)
-  assert_true b.respond_to?(:foo)
-  assert_raise(FrozenError) { mod.extend_object(cls.new.freeze) }
-  assert_raise(FrozenError, TypeError) { mod.extend_object(1) }
 end
 
 assert('Module#include', '15.2.2.4.27') do
@@ -469,15 +442,6 @@ assert('Module#define_method') do
   end
 end
 
-assert 'Module#prepend_features' do
-  mod = Module.new { def m; :mod end }
-  cls = Class.new { def m; :cls end }
-  assert_equal :cls, cls.new.m
-  mod.prepend_features(cls)
-  assert_equal :mod, cls.new.m
-  assert_raise(FrozenError) { Module.new.prepend_features(Class.new.freeze) }
-end
-
 # @!group prepend
   assert('Module#prepend') do
     module M0
@@ -566,8 +530,8 @@ end
 
     bug6662 = '[ruby-dev:45868]'
     c2 = labeled_class("c2", c)
-    anc = c2.ancestors
-    assert_equal([c2, m, c, Object], anc[0..anc.index(Object)], bug6662)
+    as = c2.ancestors
+    assert_equal([c2, m, c, Object], as[0..as.index(Object)], bug6662)
   end
 
   assert 'Module#prepend + Module#ancestors' do
@@ -787,6 +751,106 @@ assert('clone Module') do
   assert_true(B.new.foo)
 end
 
+assert('method visibility') do
+  class CallTypeTest
+    def test_private(&block)
+      func(&block)
+    end
+    def test_protected(&block)
+      self.func(&block)
+    end
+    private
+    def func
+      yield
+    end
+  end
+
+  v = CallTypeTest.new
+
+  assert_raise_with_message_pattern(NameError, "private method 'func' called for CallTypeTest") do
+    v.func { :test }
+  end
+  assert_equal :test, v.test_private { :test }
+
+  class CallTypeTest
+    protected :func
+  end
+
+  assert_raise_with_message_pattern(NameError, "protected method 'func' called for CallTypeTest") do
+    v.func { :test }
+  end
+  assert_equal :test, v.test_protected { :test }
+  assert_equal :test, v.test_private { :test }
+
+  class CallTypeTest
+    public def public_func
+      :test
+    end
+
+    public :func
+  end
+
+  assert_equal :test, v.public_func
+  assert_equal :test, v.func { :test }
+  assert_equal :test, v.test_protected { :test }
+  assert_equal :test, v.test_private { :test }
+end
+
+assert('method visibility with meta programming') do
+  assert_equal "GOOD!" do
+    f = nil
+    c = Class.new {
+      private
+      f = ->(&blk) {
+        class_eval(&blk)
+      }
+    }
+    f.call {
+      def good!
+        "GOOD!"
+      end
+    }
+    c.new.good!
+  end
+
+  assert_equal "GOOD!" do
+    c = Class.new
+    c.class_eval {
+      private
+      c.class_eval {
+        def good!
+          "GOOD!"
+        end
+      }
+    }
+    c.new.good!
+  end
+
+  assert_raise NoMethodError do
+    f = nil
+    c = Class.new {
+      private
+      f = -> {
+        def bad!
+          "BAD!"
+        end
+      }
+    }
+    f.call
+    c.new.bad!
+  end
+
+  assert_raise NoMethodError do
+    c = Class.new {
+      -> { private }.call
+      def bad!
+        "BAD!"
+      end
+    }
+    c.new.bad!
+  end
+end
+
 assert('Module#module_function') do
   module M
     def modfunc; end
@@ -794,6 +858,9 @@ assert('Module#module_function') do
   end
 
   assert_true M.respond_to?(:modfunc)
+  assert_equal nil do
+    M.modfunc
+  end
 end
 
 assert('module with non-class/module outer raises TypeError') do
@@ -841,4 +908,24 @@ assert('shared empty iv_tbl (prepend)') do
   assert_equal 1, c::CONST1
   m2::CONST2 = 2
   assert_equal 2, c::CONST2
+end
+
+assert('constant lookup #6506') do
+  Module.new do
+    module X
+      module A
+        class WWW; end
+      end
+    end
+
+    module X::Y; end
+
+    module X::Y::Z
+      extend X::A
+
+      class << self
+        assert_nothing_raised{WWW}
+      end
+    end
+  end
 end

@@ -28,6 +28,11 @@
 #include <stdlib.h>
 #endif
 
+#ifdef MRB_USE_TASK_SCHEDULER
+/* Forward declaration - actual implementation in task.c */
+void mrb_task_mark_all(mrb_state *mrb);
+#endif
+
 /*
   = Tri-color Incremental Garbage Collection
 
@@ -88,7 +93,7 @@
 
   == Generational Mode
 
-  mruby's GC offers an Generational Mode while re-using the tri-color GC
+  mruby's GC offers an Generational Mode while reusing the tri-color GC
   infrastructure. It will treat the Black objects as Old objects after each
   sweep phase, instead of painting them White. The key ideas are still the same
   as traditional generational GC:
@@ -170,17 +175,17 @@ typedef struct mrb_heap_page {
 #define GC_COLOR_MASK 7
 mrb_static_assert(MRB_GC_RED <= GC_COLOR_MASK);
 
-#define paint_gray(o) ((o)->color = GC_GRAY)
-#define paint_black(o) ((o)->color = GC_BLACK)
-#define paint_white(o) ((o)->color = GC_WHITES)
-#define paint_partial_white(s, o) ((o)->color = (s)->current_white_part)
-#define is_gray(o) ((o)->color == GC_GRAY)
-#define is_white(o) ((o)->color & GC_WHITES)
-#define is_black(o) ((o)->color == GC_BLACK)
-#define is_red(o) ((o)->color == GC_RED)
+#define paint_gray(o) ((o)->gc_color = GC_GRAY)
+#define paint_black(o) ((o)->gc_color = GC_BLACK)
+#define paint_white(o) ((o)->gc_color = GC_WHITES)
+#define paint_partial_white(s, o) ((o)->gc_color = (s)->current_white_part)
+#define is_gray(o) ((o)->gc_color == GC_GRAY)
+#define is_white(o) ((o)->gc_color & GC_WHITES)
+#define is_black(o) ((o)->gc_color == GC_BLACK)
+#define is_red(o) ((o)->gc_color == GC_RED)
 #define flip_white_part(s) ((s)->current_white_part = other_white_part(s))
 #define other_white_part(s) ((s)->current_white_part ^ GC_WHITES)
-#define is_dead(s, o) (((o)->color & other_white_part(s) & GC_WHITES) || (o)->tt == MRB_TT_FREE)
+#define is_dead(s, o) (((o)->gc_color & other_white_part(s) & GC_WHITES) || (o)->tt == MRB_TT_FREE)
 
 mrb_noreturn void mrb_raise_nomemory(mrb_state *mrb);
 
@@ -194,10 +199,10 @@ mrb_realloc_simple(mrb_state *mrb, void *p,  size_t len)
     mrb_full_gc(mrb);
   }
 #endif
-  p2 = (mrb->allocf)(mrb, p, len, mrb->allocf_ud);
+  p2 = mrb_basic_alloc_func(p, len);
   if (!p2 && len > 0 && mrb->gc.heaps && mrb->gc.state != MRB_GC_STATE_SWEEP) {
     mrb_full_gc(mrb);
-    p2 = (mrb->allocf)(mrb, p, len, mrb->allocf_ud);
+    p2 = mrb_basic_alloc_func(p, len);
   }
 
   return p2;
@@ -238,16 +243,17 @@ mrb_calloc(mrb_state *mrb, size_t nelem, size_t len)
 {
   void *p;
 
-  if (nelem > 0 && len > 0 &&
-      nelem <= SIZE_MAX / len) {
-    size_t size;
-    size = nelem * len;
+  if (nelem == 0 || len == 0) {
+    p = NULL;
+  }
+  else if (nelem <= SIZE_MAX / len) {
+    size_t size = nelem * len;
     p = mrb_malloc(mrb, size);
 
     memset(p, 0, size);
   }
   else {
-    p = NULL;
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "memory allocation overflow");
   }
 
   return p;
@@ -256,7 +262,7 @@ mrb_calloc(mrb_state *mrb, size_t nelem, size_t len)
 MRB_API void
 mrb_free(mrb_state *mrb, void *p)
 {
-  (mrb->allocf)(mrb, p, 0, mrb->allocf_ud);
+  mrb_basic_alloc_func(p, 0);
 }
 
 MRB_API void*
@@ -425,14 +431,13 @@ mrb_gc_protect(mrb_state *mrb, mrb_value obj)
 MRB_API void
 mrb_gc_register(mrb_state *mrb, mrb_value obj)
 {
-  mrb_value table;
-
   if (mrb_immediate_p(obj)) return;
-  table = mrb_gv_get(mrb, GC_ROOT_SYM);
+  mrb_value table = mrb_gv_get(mrb, GC_ROOT_SYM);
   int ai = mrb_gc_arena_save(mrb);
   mrb_gc_protect(mrb, obj);
-  if (mrb_nil_p(table) || !mrb_array_p(table)) {
+  if (!mrb_array_p(table)) {
     table = mrb_ary_new(mrb);
+    mrb_obj_ptr(table)->c = NULL; /* hide from ObjectSpace.each_object */
     mrb_gv_set(mrb, GC_ROOT_SYM, table);
   }
   mrb_ary_push(mrb, table, obj);
@@ -443,23 +448,15 @@ mrb_gc_register(mrb_state *mrb, mrb_value obj)
 MRB_API void
 mrb_gc_unregister(mrb_state *mrb, mrb_value obj)
 {
-  mrb_value table;
-  struct RArray *a;
-
   if (mrb_immediate_p(obj)) return;
-  table = mrb_gv_get(mrb, GC_ROOT_SYM);
-  if (mrb_nil_p(table)) return;
-  if (!mrb_array_p(table)) {
-    mrb_gv_set(mrb, GC_ROOT_SYM, mrb_nil_value());
-    return;
-  }
-  a = mrb_ary_ptr(table);
+  mrb_value table = mrb_gv_get(mrb, GC_ROOT_SYM);
+  if (!mrb_array_p(table)) return;
+  struct RArray *a = mrb_ary_ptr(table);
   mrb_ary_modify(mrb, a);
-  for (mrb_int i = 0; i < ARY_LEN(a); i++) {
-    if (mrb_ptr(ARY_PTR(a)[i]) == mrb_ptr(obj)) {
-      mrb_int len = ARY_LEN(a)-1;
-      mrb_value *ptr = ARY_PTR(a);
-
+  mrb_int len = ARY_LEN(a)-1;
+  mrb_value *ptr = ARY_PTR(a);
+  for (mrb_int i = 0; i <= len; i++) {
+    if (mrb_ptr(ptr[i]) == mrb_ptr(obj)) {
       ARY_SET_LEN(a, len);
       memmove(&ptr[i], &ptr[i + 1], (len - i) * sizeof(mrb_value));
       break;
@@ -486,12 +483,12 @@ mrb_obj_alloc(mrb_state *mrb, enum mrb_vtype ttype, struct RClass *cls)
       mrb_raise(mrb, E_TYPE_ERROR, "allocation failure");
     }
     tt = MRB_INSTANCE_TT(cls);
-    if (tt != MRB_TT_FALSE &&
-        ttype != MRB_TT_SCLASS &&
+    if (ttype != MRB_TT_SCLASS &&
         ttype != MRB_TT_ICLASS &&
         ttype != MRB_TT_ENV &&
         ttype != MRB_TT_BIGINT &&
-        ttype != tt) {
+        ttype != tt &&
+        !(cls == mrb->object_class && (ttype == MRB_TT_CPTR || ttype == MRB_TT_CDATA || ttype == MRB_TT_ISTRUCT))) {
       mrb_raisef(mrb, E_TYPE_ERROR, "allocation failure of %C", cls);
     }
   }
@@ -542,7 +539,6 @@ static void
 mark_context_stack(mrb_state *mrb, struct mrb_context *c)
 {
   size_t i, e;
-  mrb_value nil;
 
   if (c->stbase == NULL) return;
   if (c->ci) {
@@ -561,9 +557,8 @@ mark_context_stack(mrb_state *mrb, struct mrb_context *c)
     }
   }
   e = c->stend - c->stbase;
-  nil = mrb_nil_value();
   for (; i<e; i++) {
-    c->stbase[i] = nil;
+    SET_NIL_VALUE(c->stbase[i]);
   }
 }
 
@@ -735,6 +730,11 @@ gc_mark_children(mrb_state *mrb, mrb_gc *gc, struct RBasic *obj)
     children += mrb_rational_mark(mrb, obj);
     break;
 #endif
+#ifdef MRB_USE_SET
+  case MRB_TT_SET:
+    children += mrb_gc_mark_set(mrb, obj);
+    break;
+#endif
 
   default:
     break;
@@ -847,6 +847,12 @@ obj_free(mrb_state *mrb, struct RBasic *obj, mrb_bool end)
     mrb_gc_free_range(mrb, ((struct RRange*)obj));
     break;
 
+#ifdef MRB_USE_SET
+  case MRB_TT_SET:
+    mrb_gc_free_set(mrb, obj);
+    break;
+#endif
+
   case MRB_TT_CDATA:
     {
       struct RData *d = (struct RData*)obj;
@@ -951,6 +957,11 @@ root_scan_phase(mrb_state *mrb, mrb_gc *gc)
   if (mrb->root_c != mrb->c) {
     mark_context(mrb, mrb->root_c);
   }
+
+#ifdef MRB_USE_TASK_SCHEDULER
+  /* mark tasks - calls into task.c to mark all task queues */
+  mrb_task_mark_all(mrb);
+#endif
 }
 
 static void
@@ -1330,7 +1341,7 @@ gc_start(mrb_state *mrb, mrb_value obj)
  *  call-seq:
  *     GC.enable    -> true or false
  *
- *  Enables garbage collection, returning <code>true</code> if garbage
+ *  Enables garbage collection, returning `true` if garbage
  *  collection was previously disabled.
  *
  *     GC.disable   #=> false
@@ -1353,7 +1364,7 @@ gc_enable(mrb_state *mrb, mrb_value obj)
  *  call-seq:
  *     GC.disable    -> true or false
  *
- *  Disables garbage collection, returning <code>true</code> if garbage
+ *  Disables garbage collection, returning `true` if garbage
  *  collection was already disabled.
  *
  *     GC.disable   #=> false
