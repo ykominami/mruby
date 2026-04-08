@@ -3,6 +3,6 @@
 source 'https://rubygems.org'
 
 gem 'rake'
-gem 'yard', "~> 0.9.38"
+gem 'yard', "~> 0.9.39"
 gem 'yard-coderay'
 gem 'yard-mruby'
